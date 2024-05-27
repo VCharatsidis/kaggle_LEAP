@@ -12,14 +12,11 @@ TARGET_COLS = df_header.columns[557:]
 # Read the full dataset (or the required portion) into Polars DataFrame
 y = pl.read_csv(file_path, columns=TARGET_COLS, n_rows=3000000)
 
-# Convert TARGET_WEIGHTS to a NumPy array if it's not already
-weights = np.array(TARGET_WEIGHTS)
-
 # Convert the DataFrame to a NumPy array
 y_np = y.to_numpy()
 
 # Apply weights
-y_weighted = y_np * weights
+y_weighted = y_np * TARGET_WEIGHTS
 
 # Calculate mean and standard deviation
 mean = np.mean(y_weighted, axis=0)

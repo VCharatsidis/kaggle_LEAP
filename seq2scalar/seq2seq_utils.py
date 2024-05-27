@@ -102,7 +102,7 @@ def eval_model(model, val_loader, min_loss, patience, epoch, counter, iterations
         if avg_val_loss < min_loss:
             print("epoch:", epoch, "model saved", "chunk:", counter, "iterations:", iterations, "val loss:",
                   avg_val_loss, "time:", val_time_end - val_time_start)
-            torch.save(model, model_name)
+            torch.save(model, f"models/{model_name}")
             min_loss = avg_val_loss
             patience = 0
         else:
@@ -113,7 +113,7 @@ def eval_model(model, val_loader, min_loss, patience, epoch, counter, iterations
     return patience, min_loss
 
 
-def seq2scalar(df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x, scalar_variables_x, seq_variables_y, scalar_variables_y):
+def seq2scalar_32(df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x, scalar_variables_x, seq_variables_y, scalar_variables_y):
 
     # Preprocess the features and target columns
     for col in FEAT_COLS:
@@ -132,7 +132,7 @@ def seq2scalar(df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_var
     tensor_data = to_tensor(X, batch_size, sequence_length, seq_variables_x, scalar_variables_x)
     print("tensor_data input shape:", tensor_data.shape)
     y = y.to_numpy()
-    y = y * TARGET_WEIGHTS
+    # y = y * TARGET_WEIGHTS
     y = (y - mean_y) / std_y
     tensor_target = torch.tensor(y, dtype=torch.float32).cuda()
 

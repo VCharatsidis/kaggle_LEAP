@@ -11,7 +11,7 @@ from modified_seq_to_scalars import ModifiedSequenceToScalarTransformer
 from seq_to_scalars_transformer import SequenceToScalarTransformer
 from seq2scalar.nn_architecture.simple_transformer import SimpleTransformerModel
 from seq2scalar.nn_architecture.transformer import TransformerSeq2Seq
-from seq2seq_utils import seq2scalar, count_parameters, eval_model, collate_fn
+from seq2seq_utils import seq2scalar_32, count_parameters, eval_model, collate_fn
 from neural_net.utils import r2_score
 import polars as pl
 from constants import BATCH_SIZE, LEARNING_RATE, seq_variables_x, \
@@ -54,9 +54,9 @@ print("num columns:", num_columns)
 
 chunk_size = 500000  # Define the size of each batch
 
-model_name = 'seq2scalar_weighted.model'
+model_name = 'seq2scalar_weighted_single.model'
 
-#model = torch.load(model_name)
+# model = torch.load(model_name)
 # model = model.double()
 model = ModifiedSequenceToScalarTransformer(input_dim, output_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
 
@@ -74,8 +74,8 @@ min_loss = 10000000000000
 # Example of processing each chunk
 
 val_data = pl.read_csv("../data/validation_set.csv")
-val_dataset, _ = seq2scalar(val_data, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x,
-                            scalar_variables_x, seq_variables_y, scalar_variables_y)
+val_dataset, _ = seq2scalar_32(val_data, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x,
+                               scalar_variables_x, seq_variables_y, scalar_variables_y)
 
 print("val dataset:", val_data.shape)
 val_loader = DataLoader(val_dataset, batch_size=4*BATCH_SIZE, shuffle=True)
@@ -99,8 +99,8 @@ while patience < num_epochs:
     for df in batches:
         prep_chunk_time_start = time.time()
 
-        train_dataset, _ = seq2scalar(df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x,
-                                      scalar_variables_x, seq_variables_y, scalar_variables_y)
+        train_dataset, _ = seq2scalar_32(df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x,
+                                         scalar_variables_x, seq_variables_y, scalar_variables_y)
 
         train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn)
 

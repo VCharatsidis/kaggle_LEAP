@@ -9,7 +9,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from seq2scalar.nn_architecture.transformer import TransformerSeq2Seq
-from seq2seq_utils import seq2scalar, count_parameters, eval_model, to_tensor
+from seq2seq_utils import seq2scalar_32, count_parameters, eval_model, to_tensor
 from neural_net.utils import r2_score
 import polars as pl
 from constants import BATCH_SIZE, LEARNING_RATE, seq_variables_x, \
