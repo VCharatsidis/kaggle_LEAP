@@ -59,7 +59,7 @@ min_loss = 10000000000000
 # Example of processing each chunk
 
 val_data = pl.read_csv("../data/validation_set.csv")
-val_dataset, _ = seq2scalar_32(val_data, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x,
+val_dataset, _ = seq2scalar_32(False, val_data, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x,
                                scalar_variables_x, seq_variables_y, scalar_variables_y)
 
 print("val dataset:", val_data.shape)
@@ -77,14 +77,20 @@ batches = reader.next_batches(20)
 
 print("batches:", len(batches), "shapes:", [batch.shape for batch in batches])
 
+start_from = 11
 criterion = nn.MSELoss()  # Using MSE for regression
 while patience < num_epochs:
     counter = 0
     iterations = 0
-    for df in batches:
+    for idx, df in enumerate(batches):
+        if idx < start_from:
+            continue
+        else:
+            start_from = 0
+
         prep_chunk_time_start = time.time()
 
-        train_dataset, _ = seq2scalar_32(df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x,
+        train_dataset, _ = seq2scalar_32(False, df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x,
                                          scalar_variables_x, seq_variables_y, scalar_variables_y)
 
         train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn)

@@ -15,7 +15,7 @@ from seq2seq_utils import seq2scalar_32, count_parameters, eval_model, collate_f
 from neural_net.utils import r2_score
 import polars as pl
 from constants import BATCH_SIZE, LEARNING_RATE, seq_variables_x, \
-    scalar_variables_x, seq_variables_y, scalar_variables_y, seq_length
+    scalar_variables_x, seq_variables_y, scalar_variables_y, seq_length, ERR
 from transformer_constants import input_dim, output_dim, d_model, nhead, num_encoder_layers, num_decoder_layers, \
     dim_feedforward, dropout
 
@@ -30,8 +30,7 @@ TARGET_COLS = df_header.columns[557:]
 mean_y = np.load('../data/mean_weighted_y.npy')
 std_y = np.load('../data/std_weighted_y.npy')
 
-epsilon = 1e-10
-std_y[std_y == 0] = epsilon
+std_y = np.clip(std_y, a_min=1e-12, a_max=None)
 
 print(mean_y.shape, std_y.shape)
 
@@ -54,7 +53,7 @@ print("num columns:", num_columns)
 
 chunk_size = 500000  # Define the size of each batch
 
-model_name = 'seq2scalar_weighted_single.model'
+model_name = 'seq2scalar_weighted_32.model'
 
 # model = torch.load(model_name)
 # model = model.double()
@@ -74,7 +73,7 @@ min_loss = 10000000000000
 # Example of processing each chunk
 
 val_data = pl.read_csv("../data/validation_set.csv")
-val_dataset, _ = seq2scalar_32(val_data, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x,
+val_dataset, _ = seq2scalar_32(True, val_data, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x,
                                scalar_variables_x, seq_variables_y, scalar_variables_y)
 
 print("val dataset:", val_data.shape)
@@ -91,15 +90,20 @@ batches = reader.next_batches(20)
 # batches = [train_sample]
 
 print("batches:", len(batches), "shapes:", [batch.shape for batch in batches])
-
+start_from = 0
 criterion = nn.MSELoss()  # Using MSE for regression
 while patience < num_epochs:
     counter = 0
     iterations = 0
-    for df in batches:
+    for idx, df in enumerate(batches):
+        if idx < start_from:
+            continue
+        else:
+            start_from = 0
+
         prep_chunk_time_start = time.time()
 
-        train_dataset, _ = seq2scalar_32(df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x,
+        train_dataset, _ = seq2scalar_32(True, df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x,
                                          scalar_variables_x, seq_variables_y, scalar_variables_y)
 
         train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn)
@@ -118,6 +122,7 @@ while patience < num_epochs:
 
             optimizer.zero_grad()
             preds = model(src)
+            preds[:, std_y < (1.1 * ERR)] = 0
 
             loss = criterion(preds, tgt)
             loss.backward()
@@ -135,7 +140,7 @@ while patience < num_epochs:
                 steps = 0  # Reset step count
 
         patience, min_loss = eval_model(model, val_loader, min_loss,
-                                        patience, epoch, counter, iterations, model_name, scheduler)
+                                        patience, epoch, counter, iterations, model_name, scheduler, std_y)
 
         print()
         counter += 1

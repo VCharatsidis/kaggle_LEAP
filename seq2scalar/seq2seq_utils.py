@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from constants import TARGET_WEIGHTS
+from constants import TARGET_WEIGHTS, ERR
 from neural_net.utils import r2_score
 
 
@@ -85,13 +85,14 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
-def eval_model(model, val_loader, min_loss, patience, epoch, counter, iterations, model_name, scheduler):
+def eval_model(model, val_loader, min_loss, patience, epoch, counter, iterations, model_name, scheduler, std_y):
     model.eval()
     with torch.no_grad():
         val_loss = 0
         val_time_start = time.time()
         for src, tgt in val_loader:
             val_preds = model(src)
+            val_preds[:, std_y < (1.1 * ERR)] = 0
             val_loss += r2_score(val_preds, tgt).item()
 
         val_time_end = time.time()
@@ -113,7 +114,7 @@ def eval_model(model, val_loader, min_loss, patience, epoch, counter, iterations
     return patience, min_loss
 
 
-def seq2scalar_32(df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x, scalar_variables_x, seq_variables_y, scalar_variables_y):
+def seq2scalar_32(weighted, df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x, scalar_variables_x, seq_variables_y, scalar_variables_y):
 
     # Preprocess the features and target columns
     for col in FEAT_COLS:
@@ -132,7 +133,9 @@ def seq2scalar_32(df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_
     tensor_data = to_tensor(X, batch_size, sequence_length, seq_variables_x, scalar_variables_x)
     print("tensor_data input shape:", tensor_data.shape)
     y = y.to_numpy()
-    # y = y * TARGET_WEIGHTS
+    if weighted:
+        y = y * TARGET_WEIGHTS
+
     y = (y - mean_y) / std_y
     tensor_target = torch.tensor(y, dtype=torch.float32).cuda()
 
