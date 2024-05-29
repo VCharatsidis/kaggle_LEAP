@@ -29,9 +29,17 @@ TARGET_COLS = df_header.columns[557:]
 
 mean_y = np.load('../data/mean_y.npy')
 std_y = np.load('../data/std_y.npy')
+std_y = np.clip(std_y, a_min=1e-8, a_max=None)
 
 mean_x = np.load('../data/mean_x.npy')
 std_x = np.load('../data/std_x.npy')
+std_x = np.clip(std_x, a_min=1e-8, a_max=None)
+
+print("mean_y dtype:", mean_y.dtype)  # Output: float32
+print("std_y dtype:", std_y.dtype)  # Output: float64
+
+print("mean_x dtype:", mean_x.dtype)  # Output: float32
+print("std_x dtype:", std_x.dtype)  # Output: float64
 
 # Number of columns and their names
 column_names = df_header.columns
@@ -40,10 +48,10 @@ print("num columns:", num_columns)
 
 chunk_size = 500000  # Define the size of each batch
 
-model_name = 'seq2scalar_32.model'
+model_name = 'seq2scalar_32_small.model'
 
-model = torch.load(f"models/{model_name}")
-#model = ModifiedSequenceToScalarTransformer(input_dim, output_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
+#model = torch.load(f"models/{model_name}")
+model = ModifiedSequenceToScalarTransformer(input_dim, output_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
 
 print(f'The model has {count_parameters(model):,} trainable parameters')
 
@@ -53,7 +61,7 @@ print("num params:", sum(p.numel() for p in model.parameters() if p.requires_gra
 # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.3, patience=6, verbose=False)
 
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
-scheduler = optim.lr_scheduler.PolynomialLR(optimizer, power=1.0, total_iters=50)
+# scheduler = optim.lr_scheduler.PolynomialLR(optimizer, power=1.0, total_iters=50)
 
 min_loss = 10000000000000
 # Example of processing each chunk
@@ -69,6 +77,9 @@ patience = 0
 epoch = 0
 num_epochs = 5
 
+patience, min_loss = eval_model(model, val_loader, min_loss,
+                                        patience, epoch, 0, 0, model_name, mean_y, std_y)
+
 reader = pl.read_csv_batched(train_file, batch_size=chunk_size)
 batches = reader.next_batches(20)
 
@@ -77,17 +88,11 @@ batches = reader.next_batches(20)
 
 print("batches:", len(batches), "shapes:", [batch.shape for batch in batches])
 
-start_from = 11
 criterion = nn.MSELoss()  # Using MSE for regression
 while patience < num_epochs:
     counter = 0
     iterations = 0
     for idx, df in enumerate(batches):
-        if idx < start_from:
-            continue
-        else:
-            start_from = 0
-
         prep_chunk_time_start = time.time()
 
         train_dataset, _ = seq2scalar_32(False, df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x,
@@ -126,7 +131,7 @@ while patience < num_epochs:
                 steps = 0  # Reset step count
 
         patience, min_loss = eval_model(model, val_loader, min_loss,
-                                        patience, epoch, counter, iterations, model_name, scheduler)
+                                        patience, epoch, counter, iterations, model_name, mean_y, std_y)
 
         print()
         counter += 1

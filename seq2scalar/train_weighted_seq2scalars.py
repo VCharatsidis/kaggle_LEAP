@@ -19,6 +19,8 @@ from constants import BATCH_SIZE, LEARNING_RATE, seq_variables_x, \
 from transformer_constants import input_dim, output_dim, d_model, nhead, num_encoder_layers, num_decoder_layers, \
     dim_feedforward, dropout
 
+from transformers import get_linear_schedule_with_warmup
+
 train_file = '../data/train_set.csv'
 # Read only the first row (header) to get column names
 df_header = pl.read_csv(train_file, has_header=True, skip_rows=0, n_rows=100)
@@ -55,9 +57,9 @@ chunk_size = 500000  # Define the size of each batch
 
 model_name = 'seq2scalar_weighted_32.model'
 
-# model = torch.load(model_name)
+model = torch.load(f"models/{model_name}")
 # model = model.double()
-model = ModifiedSequenceToScalarTransformer(input_dim, output_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
+# model = ModifiedSequenceToScalarTransformer(input_dim, output_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
 
 print(f'The model has {count_parameters(model):,} trainable parameters')
 
@@ -67,7 +69,14 @@ print("num params:", sum(p.numel() for p in model.parameters() if p.requires_gra
 # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.3, patience=6, verbose=False)
 
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
-scheduler = optim.lr_scheduler.PolynomialLR(optimizer, power=1.0, total_iters=50)
+# scheduler = optim.lr_scheduler.PolynomialLR(optimizer, power=1.0, total_iters=5)
+
+num_training_steps = 20000  # Total number of training steps
+num_warmup_steps = 100     # Number of steps to warm up the learning rate
+
+# scheduler = get_linear_schedule_with_warmup(optimizer,
+#                                             num_warmup_steps=num_warmup_steps,
+#                                             num_training_steps=num_training_steps)
 
 min_loss = 10000000000000
 # Example of processing each chunk
@@ -77,7 +86,12 @@ val_dataset, _ = seq2scalar_32(True, val_data, FEAT_COLS, TARGET_COLS, mean_x, s
                                scalar_variables_x, seq_variables_y, scalar_variables_y)
 
 print("val dataset:", val_data.shape)
-val_loader = DataLoader(val_dataset, batch_size=4*BATCH_SIZE, shuffle=True)
+val_loader = DataLoader(val_dataset,
+                        batch_size=8 * BATCH_SIZE,
+                        shuffle=False,
+                        # num_workers=4,
+                        # pin_memory=True
+                        )
 
 patience = 0
 epoch = 0
@@ -90,23 +104,30 @@ batches = reader.next_batches(20)
 # batches = [train_sample]
 
 print("batches:", len(batches), "shapes:", [batch.shape for batch in batches])
-start_from = 0
+start_from = 8
 criterion = nn.MSELoss()  # Using MSE for regression
 while patience < num_epochs:
     counter = 0
     iterations = 0
     for idx, df in enumerate(batches):
-        if idx < start_from:
-            continue
-        else:
-            start_from = 0
+        # if idx < start_from:
+        #     continue
+        # else:
+        #     counter = start_from
+        #     start_from = 0
 
         prep_chunk_time_start = time.time()
 
         train_dataset, _ = seq2scalar_32(True, df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x,
                                          scalar_variables_x, seq_variables_y, scalar_variables_y)
 
-        train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn)
+        train_loader = DataLoader(train_dataset,
+                                  batch_size=BATCH_SIZE,
+                                  shuffle=True,
+                                  collate_fn=collate_fn,
+                                  # num_workers=4,
+                                  # pin_memory=True
+                                  )
 
         prep_chunk_time_end = time.time()
 
@@ -126,7 +147,9 @@ while patience < num_epochs:
 
             loss = criterion(preds, tgt)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
+            #scheduler.step()
 
             total_loss += loss.item()
 
@@ -140,7 +163,10 @@ while patience < num_epochs:
                 steps = 0  # Reset step count
 
         patience, min_loss = eval_model(model, val_loader, min_loss,
-                                        patience, epoch, counter, iterations, model_name, scheduler, std_y)
+                                        patience, epoch, counter, iterations, model_name, std_y)
+
+        for param_group in optimizer.param_groups:
+            print(f"End of Epoch {epoch}, Learning Rate: {param_group['lr']}")
 
         print()
         counter += 1

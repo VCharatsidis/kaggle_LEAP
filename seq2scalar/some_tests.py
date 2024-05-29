@@ -26,7 +26,7 @@ def test_to_tensor():
         'seq_var2_2': [22, 23, 24],
         'seq_var2_3': [25, 26, 27],
         'seq_var2_4': [28, 29, 30],
-        
+
         'scalar_var1': [31, 32, 33],
         'scalar_var2': [34, 35, 36]
     }

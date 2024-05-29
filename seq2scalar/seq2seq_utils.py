@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from constants import TARGET_WEIGHTS, ERR
+from constants import TARGET_WEIGHTS, ERR, min_std
 from neural_net.utils import r2_score
 
 
@@ -85,20 +85,31 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
-def eval_model(model, val_loader, min_loss, patience, epoch, counter, iterations, model_name, scheduler, std_y):
+def eval_model(model, val_loader, min_loss, patience, epoch, counter, iterations, model_name, mean_y, std_y):
     model.eval()
     with torch.no_grad():
         val_loss = 0
         val_time_start = time.time()
         for src, tgt in val_loader:
             val_preds = model(src)
-            val_preds[:, std_y < (1.1 * ERR)] = 0
+            val_preds = val_preds.cpu()
+
+            tgt = tgt.cpu().numpy()
+            tgt = ((tgt * std_y) + mean_y) * TARGET_WEIGHTS
+
+            val_preds[:, std_y < (1.1 * min_std)] = 0
+            val_preds = val_preds.numpy()
+            val_preds = ((val_preds * std_y) + mean_y) * TARGET_WEIGHTS
+
+            tgt = torch.tensor(tgt, dtype=torch.float64).cuda()
+            val_preds = torch.tensor(val_preds, dtype=torch.float64).cuda()
+
             val_loss += r2_score(val_preds, tgt).item()
 
         val_time_end = time.time()
 
         avg_val_loss = val_loss / len(val_loader)
-        scheduler.step()  # Adjust learning rate
+        #scheduler.step()  # Adjust learning rate
 
         if avg_val_loss < min_loss:
             print("epoch:", epoch, "model saved", "chunk:", counter, "iterations:", iterations, "val loss:",
