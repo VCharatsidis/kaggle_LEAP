@@ -3,8 +3,6 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 
-from constants import min_std
-
 
 class NumpyDataset(Dataset):
     def __init__(self, x, y):
@@ -29,7 +27,7 @@ class NumpyDataset(Dataset):
         return torch.from_numpy(self.x[index]).float().cuda(), torch.from_numpy(self.y[index]).float().cuda()
 
 
-def calc_x_mean_and_std(file, FEAT_COLS):
+def calc_x_mean_and_std(file, FEAT_COLS, min_std):
     data = pl.read_csv(file, columns=FEAT_COLS)
 
     for col in FEAT_COLS:
@@ -44,7 +42,7 @@ def calc_x_mean_and_std(file, FEAT_COLS):
     print("done calculating mean and std for X")
 
 
-def calc_y_mean_and_std(file, TARGET_COLS):
+def calc_y_mean_and_std(file, TARGET_COLS, min_std):
     data = pl.read_csv(file, columns=TARGET_COLS)
 
     for col in TARGET_COLS:

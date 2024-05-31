@@ -13,7 +13,8 @@ from seq2seq_utils import seq2scalar_32, count_parameters, eval_model, to_tensor
 from neural_net.utils import r2_score
 import polars as pl
 from constants import BATCH_SIZE, LEARNING_RATE, seq_variables_x, \
-    scalar_variables_x, seq_variables_y, scalar_variables_y, min_std
+    scalar_variables_x, seq_variables_y, scalar_variables_y
+
 from transformer_constants import input_dim, output_dim, d_model, nhead, num_encoder_layers, num_decoder_layers, \
     dim_feedforward, dropout
 

@@ -41,6 +41,7 @@ def calculate_mean_std_in_chunks(file_path, chunk_size, target_cols, weights):
 # Usage example
 file_path = '../data/train.csv'
 df_header = pl.read_csv(file_path, has_header=True, skip_rows=0, n_rows=1)
+FEAT_COLS = df_header.columns[1:557]
 TARGET_COLS = df_header.columns[557:]
 weights = np.array(TARGET_WEIGHTS)
 

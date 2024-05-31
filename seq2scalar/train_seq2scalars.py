@@ -7,6 +7,7 @@ import torch.optim as optim
 
 from torch.utils.data import DataLoader
 
+from modified_seq_to_scalar_positional import ModifiedSequenceToScalarTransformer_positional
 from modified_seq_to_scalars import ModifiedSequenceToScalarTransformer
 from seq_to_scalars_transformer import SequenceToScalarTransformer
 from seq2scalar.nn_architecture.simple_transformer import SimpleTransformerModel
@@ -15,7 +16,7 @@ from seq2seq_utils import seq2scalar_32, count_parameters, eval_model, collate_f
 from neural_net.utils import r2_score
 import polars as pl
 from constants import BATCH_SIZE, LEARNING_RATE, seq_variables_x, \
-    scalar_variables_x, seq_variables_y, scalar_variables_y, seq_length
+    scalar_variables_x, seq_variables_y, scalar_variables_y, seq_length, min_std
 from transformer_constants import input_dim, output_dim, d_model, nhead, num_encoder_layers, num_decoder_layers, \
     dim_feedforward, dropout
 
@@ -27,13 +28,15 @@ TARGET_COLS = df_header.columns[557:]
 
 #calc_x_mean_and_std(file='../data/train.csv', FEAT_COLS=FEAT_COLS)
 
+min_std = 1e-12
+
 mean_y = np.load('../data/mean_y.npy')
 std_y = np.load('../data/std_y.npy')
-std_y = np.clip(std_y, a_min=1e-8, a_max=None)
+std_y = np.clip(std_y, a_min=min_std, a_max=None)
 
 mean_x = np.load('../data/mean_x.npy')
 std_x = np.load('../data/std_x.npy')
-std_x = np.clip(std_x, a_min=1e-8, a_max=None)
+std_x = np.clip(std_x, a_min=min_std, a_max=None)
 
 print("mean_y dtype:", mean_y.dtype)  # Output: float32
 print("std_y dtype:", std_y.dtype)  # Output: float64
@@ -48,11 +51,12 @@ print("num columns:", num_columns)
 
 chunk_size = 500000  # Define the size of each batch
 
-model_name = 'seq2scalar_32_small.model'
+model_name = f'seq2scalar_32_clip_min_std_{min_std}_small_positional.model'
 
 #model = torch.load(f"models/{model_name}")
-model = ModifiedSequenceToScalarTransformer(input_dim, output_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
+#model = ModifiedSequenceToScalarTransformer(input_dim, output_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
 
+model = ModifiedSequenceToScalarTransformer_positional(input_dim, output_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
 print(f'The model has {count_parameters(model):,} trainable parameters')
 
 
@@ -77,7 +81,7 @@ patience = 0
 epoch = 0
 num_epochs = 5
 
-patience, min_loss = eval_model(model, val_loader, min_loss,
+patience, min_loss = eval_model(min_std, False, model, val_loader, min_loss,
                                         patience, epoch, 0, 0, model_name, mean_y, std_y)
 
 reader = pl.read_csv_batched(train_file, batch_size=chunk_size)
@@ -114,6 +118,7 @@ while patience < num_epochs:
 
             optimizer.zero_grad()
             preds = model(src)
+            preds[:, std_y < (1.1 * min_std)] *= 0
 
             loss = criterion(preds, tgt)
             loss.backward()
@@ -130,7 +135,7 @@ while patience < num_epochs:
                 total_loss = 0  # Reset the loss for the next steps
                 steps = 0  # Reset step count
 
-        patience, min_loss = eval_model(model, val_loader, min_loss,
+        patience, min_loss = eval_model(min_std, False, model, val_loader, min_loss,
                                         patience, epoch, counter, iterations, model_name, mean_y, std_y)
 
         print()

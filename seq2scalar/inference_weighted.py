@@ -3,19 +3,10 @@ import time
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
-import torch.optim as optim
-
-from torch.utils.data import DataLoader
-
-from seq2scalar.nn_architecture.transformer import TransformerSeq2Seq
-from seq2seq_utils import seq2scalar_32, count_parameters, eval_model, to_tensor
-from neural_net.utils import r2_score
+from seq2seq_utils import to_tensor
 import polars as pl
-from constants import BATCH_SIZE, LEARNING_RATE, seq_variables_x, \
-    scalar_variables_x, seq_variables_y, scalar_variables_y
-from transformer_constants import input_dim, output_dim, d_model, nhead, num_encoder_layers, num_decoder_layers, \
-    dim_feedforward, dropout
+from constants import seq_variables_x, scalar_variables_x
+
 
 train_file = '../data/train.csv'
 # Read only the first row (header) to get column names
@@ -25,11 +16,15 @@ TARGET_COLS = df_header.columns[557:]
 
 #calc_x_mean_and_std(file='../data/train.csv', FEAT_COLS=FEAT_COLS)
 
-mean_y = np.load('../data/mean_y.npy')
-std_y = np.load('../data/std_y.npy')
+mean_y = np.load('../data/mean_weighted_y.npy')
+std_y = np.load('../data/std_weighted_y.npy')
+
+min_std = 1e-12
+std_y = np.clip(std_y, a_min=min_std, a_max=None)
 
 mean_x = np.load('../data/mean_x.npy')
 std_x = np.load('../data/std_x.npy')
+std_x = np.clip(std_x, a_min=min_std, a_max=None)
 
 print("mean_y:", mean_y.shape, "std_y:", std_y.shape)
 
@@ -38,7 +33,7 @@ column_names = df_header.columns
 num_columns = len(column_names)
 print("num columns:", num_columns)
 
-model_name = 'seq2scalar.model'
+model_name = f'models/seq2scalar_weighted_32_positional_{min_std}.model'
 model = torch.load(model_name)
 
 
@@ -102,9 +97,9 @@ print(sub.columns.to_list())
 print(len(sub.columns.to_list()))
 
 print(sub.iloc[:, 1:].shape)
-sub.iloc[:, 1:] = sub.iloc[:, 1:].values * test_preds
+sub.iloc[:, 1:] = test_preds
 
 test_polars = pl.from_pandas(sub[["sample_id"] + TARGET_COLS])
 print(test_polars.shape)
-test_polars.write_csv("seq_to_scalar_sub.csv")
+test_polars.write_csv("seq_to_scalar_weighted_sub.csv")
 print("inference done!")

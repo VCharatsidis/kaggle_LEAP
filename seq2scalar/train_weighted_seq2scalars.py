@@ -7,6 +7,7 @@ import torch.optim as optim
 
 from torch.utils.data import DataLoader
 
+from modified_seq_to_scalar_positional import ModifiedSequenceToScalarTransformer_positional
 from modified_seq_to_scalars import ModifiedSequenceToScalarTransformer
 from seq_to_scalars_transformer import SequenceToScalarTransformer
 from seq2scalar.nn_architecture.simple_transformer import SimpleTransformerModel
@@ -15,7 +16,7 @@ from seq2seq_utils import seq2scalar_32, count_parameters, eval_model, collate_f
 from neural_net.utils import r2_score
 import polars as pl
 from constants import BATCH_SIZE, LEARNING_RATE, seq_variables_x, \
-    scalar_variables_x, seq_variables_y, scalar_variables_y, seq_length, ERR
+    scalar_variables_x, seq_variables_y, scalar_variables_y, seq_length
 from transformer_constants import input_dim, output_dim, d_model, nhead, num_encoder_layers, num_decoder_layers, \
     dim_feedforward, dropout
 
@@ -32,7 +33,8 @@ TARGET_COLS = df_header.columns[557:]
 mean_y = np.load('../data/mean_weighted_y.npy')
 std_y = np.load('../data/std_weighted_y.npy')
 
-std_y = np.clip(std_y, a_min=1e-12, a_max=None)
+min_std = 1e-12
+std_y = np.clip(std_y, a_min=min_std, a_max=None)
 
 print(mean_y.shape, std_y.shape)
 
@@ -48,6 +50,8 @@ if np.any(np.isnan(mean_y)) or np.any(np.isinf(mean_y)):
 mean_x = np.load('../data/mean_x.npy')
 std_x = np.load('../data/std_x.npy')
 
+std_x = np.clip(std_x, a_min=min_std, a_max=None)
+
 # Number of columns and their names
 column_names = df_header.columns
 num_columns = len(column_names)
@@ -55,11 +59,13 @@ print("num columns:", num_columns)
 
 chunk_size = 500000  # Define the size of each batch
 
-model_name = 'seq2scalar_weighted_32.model'
+model_name = f'seq2scalar_weighted_32_positional_{min_std}.model'
 
 model = torch.load(f"models/{model_name}")
 # model = model.double()
 # model = ModifiedSequenceToScalarTransformer(input_dim, output_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
+
+#model = ModifiedSequenceToScalarTransformer_positional(input_dim, output_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
 
 print(f'The model has {count_parameters(model):,} trainable parameters')
 
@@ -143,9 +149,9 @@ while patience < num_epochs:
 
             optimizer.zero_grad()
             preds = model(src)
-            preds[:, std_y < (1.1 * ERR)] = 0
+            preds[:, std_y < (1.1 * min_std)] *= 0
 
-            loss = criterion(preds, tgt)
+            loss = r2_score(preds, tgt)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
@@ -162,8 +168,8 @@ while patience < num_epochs:
                 total_loss = 0  # Reset the loss for the next steps
                 steps = 0  # Reset step count
 
-        patience, min_loss = eval_model(model, val_loader, min_loss,
-                                        patience, epoch, counter, iterations, model_name, std_y)
+        patience, min_loss = eval_model(min_std, True, model, val_loader, min_loss,
+                                        patience, epoch, counter, iterations, model_name, mean_y, std_y)
 
         for param_group in optimizer.param_groups:
             print(f"End of Epoch {epoch}, Learning Rate: {param_group['lr']}")

@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from constants import TARGET_WEIGHTS, ERR, min_std
+from constants import TARGET_WEIGHTS
 from neural_net.utils import r2_score
 
 
@@ -85,7 +85,7 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
-def eval_model(model, val_loader, min_loss, patience, epoch, counter, iterations, model_name, mean_y, std_y):
+def eval_model(min_std, weighted, model, val_loader, min_loss, patience, epoch, counter, iterations, model_name, mean_y, std_y):
     model.eval()
     with torch.no_grad():
         val_loss = 0
@@ -95,11 +95,18 @@ def eval_model(model, val_loader, min_loss, patience, epoch, counter, iterations
             val_preds = val_preds.cpu()
 
             tgt = tgt.cpu().numpy()
-            tgt = ((tgt * std_y) + mean_y) * TARGET_WEIGHTS
+            if not weighted:
+                tgt = ((tgt * std_y) + mean_y) * TARGET_WEIGHTS
+            else:
+                tgt = (tgt * std_y) + mean_y
 
             val_preds[:, std_y < (1.1 * min_std)] = 0
             val_preds = val_preds.numpy()
-            val_preds = ((val_preds * std_y) + mean_y) * TARGET_WEIGHTS
+
+            if not weighted:
+                val_preds = ((val_preds * std_y) + mean_y) * TARGET_WEIGHTS
+            else:
+                val_preds = (val_preds * std_y) + mean_y
 
             tgt = torch.tensor(tgt, dtype=torch.float64).cuda()
             val_preds = torch.tensor(val_preds, dtype=torch.float64).cuda()
