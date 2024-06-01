@@ -68,6 +68,27 @@ def to_tensor(df, batch_size, sequence_length, seq_variables_x, scalar_variables
     return tensor_data
 
 
+def to_tensor_rev(df, batch_size, sequence_length, seq_variables_x, scalar_variables_x):
+    num_variables = len(seq_variables_x) + len(scalar_variables_x)
+
+    # Initialize the numpy array with shape (batch_size, num_variables, sequence_length)
+    data_X = np.zeros((batch_size, num_variables, sequence_length))
+
+    # Process vertically resolved variables
+    for i, var in enumerate(seq_variables_x):
+        columns = [f"{var}_{level}" for level in range(sequence_length)]
+        data_X[:, i, :] = df[columns].to_numpy()
+
+    # Process scalar variables
+    for j, var in enumerate(scalar_variables_x):
+        data_X[:, len(seq_variables_x) + j, :] = df[var].to_numpy()[:, np.newaxis]
+
+    # Convert the numpy array to a PyTorch tensor
+    tensor_data = torch.tensor(data_X, dtype=torch.float32).cuda()
+
+    return tensor_data
+
+
 # Custom Dataset Class
 class CustomDataset(Dataset):
     def __init__(self, data, target):
@@ -149,6 +170,37 @@ def seq2scalar_32(weighted, df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, s
 
     # Convert the numpy array to a PyTorch tensor
     tensor_data = to_tensor(X, batch_size, sequence_length, seq_variables_x, scalar_variables_x)
+    print("tensor_data input shape:", tensor_data.shape)
+    y = y.to_numpy()
+    if weighted:
+        y = y * TARGET_WEIGHTS
+
+    y = (y - mean_y) / std_y
+    tensor_target = torch.tensor(y, dtype=torch.float32).cuda()
+
+    # Create an instance of the dataset
+    dataset = CustomDataset(tensor_data, tensor_target)
+
+    return dataset, tensor_data
+
+
+def seq2scalar_32_rev(weighted, df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x, scalar_variables_x, seq_variables_y, scalar_variables_y):
+
+    # Preprocess the features and target columns
+    for col in FEAT_COLS:
+        X = df.select(FEAT_COLS).with_columns(pl.col(col).cast(pl.Float64))
+    for col in TARGET_COLS:
+        y = df.select(TARGET_COLS).with_columns(pl.col(col).cast(pl.Float64))
+
+    # Normalize features
+    X = X.with_columns([(pl.col(col) - mean_x[i]) / std_x[i] for i, col in enumerate(FEAT_COLS)])
+
+    # Reshape the features into the desired shape [batch_size, 60, 25]
+    batch_size = X.shape[0]
+    atmospheric_levels = 60
+
+    # Convert the numpy array to a PyTorch tensor
+    tensor_data = to_tensor_rev(X, batch_size, atmospheric_levels, seq_variables_x, scalar_variables_x)
     print("tensor_data input shape:", tensor_data.shape)
     y = y.to_numpy()
     if weighted:

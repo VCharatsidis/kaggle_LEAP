@@ -42,7 +42,7 @@ print("num columns:", num_columns)
 model_name = 'seq2scalar.model'
 model = torch.load(model_name)
 
-
+min_std = 1e-12
 patience = 0
 rounds = 0
 num_epochs = 1
