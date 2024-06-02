@@ -7,3 +7,6 @@ num_encoder_layers = 4
 num_decoder_layers = 0
 dim_feedforward = 512
 dropout = 0.1
+
+scalar_vars_num = 8
+vector_vars_num = 6

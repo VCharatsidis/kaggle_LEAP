@@ -7,16 +7,13 @@ import torch.optim as optim
 
 from torch.utils.data import DataLoader
 
-from modified_seq_to_scalar_positional import ModifiedSequenceToScalarTransformer_positional
-from seq2scalar.nn_architecture.simple_transformer import SimpleTransformerModel
-from seq2scalar.nn_architecture.transformer import TransformerSeq2Seq
-from seq2seq_utils import seq2scalar_32, count_parameters, eval_model, collate_fn
-from neural_net.utils import r2_score
+from seq2seq import SequenceToSequenceTransformer
+from seq2seq_utils import count_parameters, eval_model, collate_fn, seq2seq_32, eval_model_seq_2_seq, mean_and_flatten
 import polars as pl
 from constants import BATCH_SIZE, LEARNING_RATE, seq_variables_x, \
     scalar_variables_x, seq_variables_y, scalar_variables_y, seq_length
 from transformer_constants import input_dim, output_dim, d_model, nhead, num_encoder_layers, num_decoder_layers, \
-    dim_feedforward, dropout
+    dim_feedforward, dropout, scalar_vars_num, vector_vars_num
 
 from transformers import get_linear_schedule_with_warmup
 
@@ -57,23 +54,19 @@ print("num columns:", num_columns)
 
 chunk_size = 500000  # Define the size of each batch
 
-model_name = f'seq2scalar_weighted_32_positional_{min_std}.model'
+model_name = f'seq2seq_weighted_32_positional_{min_std}.model'
 
-model = torch.load(f"models/{model_name}")
+# model = torch.load(f"models/{model_name}")
 # model = model.double()
-# model = ModifiedSequenceToScalarTransformer(input_dim, output_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
+target_vars = 14
+model = SequenceToSequenceTransformer(input_dim, target_vars, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
 
-#model = ModifiedSequenceToScalarTransformer_positional(input_dim, output_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
+torch.save(model, f"models/{model_name}")
 
 print(f'The model has {count_parameters(model):,} trainable parameters')
-
-
 print("num params:", sum(p.numel() for p in model.parameters() if p.requires_grad))
-# optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
-# scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.3, patience=6, verbose=False)
 
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
-# scheduler = optim.lr_scheduler.PolynomialLR(optimizer, power=1.0, total_iters=5)
 
 num_training_steps = 20000  # Total number of training steps
 num_warmup_steps = 100     # Number of steps to warm up the learning rate
@@ -86,7 +79,7 @@ min_loss = 10000000000000
 # Example of processing each chunk
 
 val_data = pl.read_csv("../data/validation_set.csv")
-val_dataset, _ = seq2scalar_32(True, val_data, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x,
+val_dataset, _ = seq2seq_32(min_std, val_data, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x,
                                scalar_variables_x, seq_variables_y, scalar_variables_y)
 
 print("val dataset:", val_data.shape)
@@ -102,10 +95,11 @@ epoch = 0
 num_epochs = 5
 
 reader = pl.read_csv_batched(train_file, batch_size=chunk_size)
-batches = reader.next_batches(20)
+batches = reader.next_batches(1)
 
 # train_sample = pl.read_csv("../data/train_set.csv", n_rows=100000)
 # batches = [train_sample]
+
 
 print("batches:", len(batches), "shapes:", [batch.shape for batch in batches])
 start_from = 8
@@ -122,7 +116,7 @@ while patience < num_epochs:
 
         prep_chunk_time_start = time.time()
 
-        train_dataset, _ = seq2scalar_32(True, df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x,
+        train_dataset, _ = seq2seq_32(min_std, df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x,
                                          scalar_variables_x, seq_variables_y, scalar_variables_y)
 
         train_loader = DataLoader(train_dataset,
@@ -146,10 +140,14 @@ while patience < num_epochs:
             #     break
 
             optimizer.zero_grad()
-            preds = model(src)
+            preds = model(src, tgt)
+
+            preds = mean_and_flatten(preds)
+            tgt = mean_and_flatten(tgt)
             preds[:, std_y < (1.1 * min_std)] *= 0
 
             loss = criterion(preds, tgt)
+
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
@@ -166,7 +164,7 @@ while patience < num_epochs:
                 total_loss = 0  # Reset the loss for the next steps
                 steps = 0  # Reset step count
 
-        patience, min_loss = eval_model(min_std, True, model, val_loader, min_loss,
+        patience, min_loss = eval_model_seq_2_seq(min_std, True, model, val_loader, min_loss,
                                         patience, epoch, counter, iterations, model_name, mean_y, std_y)
 
         for param_group in optimizer.param_groups:

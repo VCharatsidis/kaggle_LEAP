@@ -33,9 +33,8 @@ column_names = df_header.columns
 num_columns = len(column_names)
 print("num columns:", num_columns)
 
-model_name = f'models/seq2scalar_weighted_32_positional_{min_std}.model'
+model_name = f'seq2seq_weighted_32_positional_{min_std}.model'
 model = torch.load(model_name)
-
 
 patience = 0
 rounds = 0
@@ -72,7 +71,7 @@ def collect_predictions_in_batches(model, input_data_test, batch_size):
             print(i)
             # Select batch of samples
             batch = input_data_test[i:i+batch_size]
-            preds = model(batch)
+            preds = model.generate(batch)
             all_predictions.append(preds.cpu().numpy())
 
     # Concatenate all predictions
@@ -108,5 +107,5 @@ REPLACE_TO = ['state_q0002_0', 'state_q0002_1', 'state_q0002_2', 'state_q0002_3'
 
 
 print(test_polars.shape)
-test_polars.write_csv("seq_to_scalar_weighted_sub.csv")
+test_polars.write_csv("seq_to_seq_weighted_sub.csv")
 print("inference done!")
