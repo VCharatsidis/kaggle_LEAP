@@ -4,8 +4,8 @@ num_features = 556
 num_targets = 368
 seq_length = 60
 
-BATCH_SIZE = 1024
-LEARNING_RATE = 2e-5
+BATCH_SIZE = 512
+LEARNING_RATE = 1e-4
 total_rows = 10091520
 
 # Identify vertically resolved variables and scalar variables

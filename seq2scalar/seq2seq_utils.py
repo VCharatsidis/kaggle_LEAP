@@ -49,6 +49,19 @@ def collate_fn(batch):
     return data, targets
 
 
+def to_tensor_flat(df, batch_size, features):
+
+    data = np.zeros((batch_size, len(features), 1))
+
+    for idx, col in enumerate(features):
+        data[:, idx, 0] = df[col].to_numpy()
+
+    # Convert the numpy array to a PyTorch tensor
+    tensor_data = torch.tensor(data, dtype=torch.float32).cuda()
+
+    return tensor_data
+
+
 def to_tensor(df, batch_size, sequence_length, seq_variables, scalar_variables):
     num_variables = len(seq_variables) + len(scalar_variables)
 
@@ -170,6 +183,64 @@ def eval_model_seq_2_seq(min_std, weighted, model, val_loader, min_loss, patienc
     return patience, min_loss
 
 
+def eval_generate_model_seq_2_seq(min_std, weighted, model, val_loader, min_loss, patience, epoch, counter, iterations, model_name, mean_y, std_y):
+    model.eval()
+    with torch.no_grad():
+        val_loss = []
+        val_time_start = time.time()
+        for idx, (src, tgt) in enumerate(val_loader):
+            if idx % 10 == 0:
+                print("val idx:", idx)
+
+            if idx > 200:
+                break
+
+            val_preds = model.generate(src, 60)
+            val_preds = val_preds.cpu()
+
+            val_preds = mean_and_flatten(val_preds)
+            tgt = mean_and_flatten(tgt)
+
+            tgt = tgt.cpu().numpy()
+            if not weighted:
+                tgt = ((tgt * std_y) + mean_y) * TARGET_WEIGHTS
+            else:
+                tgt = (tgt * std_y) + mean_y
+
+            val_preds[:, std_y < (1.1 * min_std)] = 0
+            val_preds = val_preds.numpy()
+
+            if not weighted:
+                val_preds = ((val_preds * std_y) + mean_y) * TARGET_WEIGHTS
+            else:
+                val_preds = (val_preds * std_y) + mean_y
+
+            tgt = torch.tensor(tgt, dtype=torch.float64).cuda()
+            val_preds = torch.tensor(val_preds, dtype=torch.float64).cuda()
+
+            this_val_loss = r2_score(val_preds, tgt).item()
+            val_loss.append(this_val_loss)
+
+        val_time_end = time.time()
+
+        avg_val_loss = sum(val_loss) / len(this_val_loss)
+        #scheduler.step()  # Adjust learning rate
+
+        if avg_val_loss < min_loss:
+            print("epoch:", epoch, "model saved", "chunk:", counter, "iterations:", iterations, "val loss:",
+                  avg_val_loss, "time:", val_time_end - val_time_start)
+            torch.save(model, f"models/{model_name}")
+            min_loss = avg_val_loss
+            patience = 0
+        else:
+            print("epoch:", epoch, f"No improvement in validation loss for {patience} epochs.", "chunk:", counter,
+                  "iterations:", iterations, "val loss:", avg_val_loss, "time:", val_time_end - val_time_start)
+            patience += 1
+
+    model.train()
+    return patience, min_loss
+
+
 def eval_model(min_std, weighted, model, val_loader, min_loss, patience, epoch, counter, iterations, model_name, mean_y, std_y):
     model.eval()
     with torch.no_grad():
@@ -271,6 +342,36 @@ def seq2scalar_32(weighted, df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, s
 
     # Convert the numpy array to a PyTorch tensor
     tensor_data = to_tensor(X, batch_size, sequence_length, seq_variables_x, scalar_variables_x)
+    print("tensor_data input shape:", tensor_data.shape)
+    y = y.to_numpy()
+    if weighted:
+        y = y * TARGET_WEIGHTS
+
+    y = (y - mean_y) / std_y
+    tensor_target = torch.tensor(y, dtype=torch.float32).cuda()
+
+    # Create an instance of the dataset
+    dataset = CustomDataset(tensor_data, tensor_target)
+
+    return dataset, tensor_data
+
+
+def seq2scalar_flat(weighted, df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y):
+
+    # Preprocess the features and target columns
+    for col in FEAT_COLS:
+        X = df.select(FEAT_COLS).with_columns(pl.col(col).cast(pl.Float64))
+    for col in TARGET_COLS:
+        y = df.select(TARGET_COLS).with_columns(pl.col(col).cast(pl.Float64))
+
+    # Normalize features
+    X = X.with_columns([(pl.col(col) - mean_x[i]) / std_x[i] for i, col in enumerate(FEAT_COLS)])
+
+    # Reshape the features into the desired shape [batch_size, 60, 25]
+    batch_size = X.shape[0]
+
+    # Convert the numpy array to a PyTorch tensor
+    tensor_data = to_tensor_flat(df, batch_size, FEAT_COLS)
     print("tensor_data input shape:", tensor_data.shape)
     y = y.to_numpy()
     if weighted:

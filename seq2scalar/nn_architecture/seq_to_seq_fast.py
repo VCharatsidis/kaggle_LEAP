@@ -1,8 +1,8 @@
-import numpy as np
 import torch
 import math
 import torch.nn as nn
 import random
+
 
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=60):
@@ -21,7 +21,7 @@ class PositionalEncoding(nn.Module):
 
 
 class SequenceToSequenceTransformer(nn.Module):
-    def __init__(self, src_input_dim, tgt_input_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout=0.1, src_seq_length=60, tgt_seq_length=60):
+    def __init__(self, src_input_dim, tgt_input_dim, d_model, nhead, num_encoder_layers, num_decoder_layers, dim_feedforward, dropout=0.1, src_seq_length=60, tgt_seq_length=60):
         super(SequenceToSequenceTransformer, self).__init__()
 
         self.src_seq_length = src_seq_length
@@ -47,49 +47,30 @@ class SequenceToSequenceTransformer(nn.Module):
 
         # Transformer Decoder
         self.transformer_decoder = nn.TransformerDecoder(
-            nn.TransformerDecoderLayer(d_model=d_model, nhead=1, dim_feedforward=dim_feedforward, dropout=dropout, batch_first=True),
-            num_layers=num_encoder_layers
+            nn.TransformerDecoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, dropout=dropout, batch_first=True),
+            num_layers=num_decoder_layers
         )
 
-        self.masks = {}
-        for i in range(1, 61):
-            self.masks[i] = self.generate_square_subsequent_mask(i).cuda().bool()
-
-    def forward(self, src, tgt, teacher_forcing_ratio=0.5):
+    def forward(self, src, tgt):
         # Encode the source sequence
         src = self.src_input_linear(src)
         src = self.src_positional_encoding(src)
         memory = self.transformer_encoder(src)
 
-        # Initialize the output tensor
-        tgt = self.tgt_input_linear(tgt)
-        tgt = self.tgt_positional_encoding(tgt)
+        # Prepare the target input
+        tgt_in = self.tgt_input_linear(tgt)
+        tgt_in = self.tgt_positional_encoding(tgt_in)
 
-        outputs = []
-        output = tgt[:, 0, :].unsqueeze(1)  # Start with the first token
-        seq_len = tgt.size(1)
-        teacher_forcing_decisions = np.random.rand(seq_len) < teacher_forcing_ratio
+        # Create masks
+        tgt_mask = self.generate_square_subsequent_mask(tgt_in.size(1)).to(tgt_in.device)
 
-        for t in range(1, seq_len + 1):  # Loop from 1 to seq_len
+        # Decoder output
+        decoder_output = self.transformer_decoder(tgt_in, memory, tgt_mask=tgt_mask)
 
-            output_step = self.transformer_decoder(output,
-                                                   memory,
-                                                   tgt_mask=self.masks[t])
+        # Final output
+        output = self.output_linear(decoder_output)
 
-            next_token = self.output_linear(output_step[:, -1, :])
-            outputs.append(next_token.unsqueeze(1))
-
-            if t < seq_len:  # Only append next input if t < seq_len
-                # Use the true target or the model's own prediction based on teacher forcing
-                if teacher_forcing_decisions[t]:
-                    next_input = tgt[:, t, :].unsqueeze(1)
-                else:
-                    next_input = self.output_to_dmodel(next_token).unsqueeze(1)
-
-                output = torch.cat((output, next_input), dim=1)
-
-        outputs = torch.cat(outputs, dim=1)
-        return outputs
+        return output
 
     def generate(self, src, max_len):
         # Encode the source sequence
@@ -103,9 +84,10 @@ class SequenceToSequenceTransformer(nn.Module):
 
         outputs = []
 
-        for i in range(max_len):
+        for _ in range(max_len):
             tgt_step = self.tgt_positional_encoding(tgt)
-            output_step = self.transformer_decoder(tgt_step, memory, tgt_mask=self.masks[i + 1])
+            tgt_mask = self.generate_square_subsequent_mask(tgt.size(1)).to(tgt.device)  # Generate subsequent mask
+            output_step = self.transformer_decoder(tgt_step, memory, tgt_mask=tgt_mask)
             next_token = self.output_linear(output_step[:, -1, :])
             outputs.append(next_token.unsqueeze(1))
             next_token_proj = self.output_to_dmodel(next_token).unsqueeze(1)
@@ -118,8 +100,6 @@ class SequenceToSequenceTransformer(nn.Module):
         mask = mask.masked_fill(mask == 0, float(0.0))  # Fill the upper triangular part with -inf
         return mask
 
-    def create_padding_mask(self, seq):
-        return (seq == 0)  # Return a 2D mask
 
 # Example usage
 src_input_dim = 25
@@ -128,19 +108,17 @@ output_dim = 14
 d_model = 32
 nhead = 4
 num_encoder_layers = 2
+num_decoder_layers = 2
 dim_feedforward = 64
 dropout = 0.1
 src_seq_length = 60
 tgt_seq_length = 60
 
-model = SequenceToSequenceTransformer(src_input_dim, tgt_input_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, src_seq_length).cuda()
+model = SequenceToSequenceTransformer(src_input_dim, tgt_input_dim, d_model, nhead, num_encoder_layers, num_decoder_layers, dim_feedforward, dropout, src_seq_length).cuda()
 
 # Dummy input
 src = torch.rand(16, src_seq_length, src_input_dim).cuda()  # batch_size=16, seq_length=60, src_input_dim=25
 tgt = torch.rand(16, tgt_seq_length, tgt_input_dim).cuda()  # batch_size=16, seq_length=60, tgt_input_dim=14
-
-# Define the teacher forcing ratio
-teacher_forcing_ratio = 0.5  # Start with a high value and gradually decrease
 
 output = model(src, tgt)
 

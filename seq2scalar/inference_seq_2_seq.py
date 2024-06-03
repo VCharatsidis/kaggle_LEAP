@@ -3,7 +3,7 @@ import time
 import numpy as np
 import pandas as pd
 import torch
-from seq2seq_utils import to_tensor
+from seq2seq_utils import to_tensor, mean_and_flatten
 import polars as pl
 from constants import seq_variables_x, scalar_variables_x
 
@@ -33,7 +33,7 @@ column_names = df_header.columns
 num_columns = len(column_names)
 print("num columns:", num_columns)
 
-model_name = f'seq2seq_weighted_32_positional_{min_std}.model'
+model_name = f'models/seq2seq_weighted_32_positional_{min_std}.model'
 model = torch.load(model_name)
 
 patience = 0
@@ -71,7 +71,9 @@ def collect_predictions_in_batches(model, input_data_test, batch_size):
             print(i)
             # Select batch of samples
             batch = input_data_test[i:i+batch_size]
-            preds = model.generate(batch)
+            preds = model.generate(batch, 60)
+            preds = mean_and_flatten(preds)
+            print(preds.shape)
             all_predictions.append(preds.cpu().numpy())
 
     # Concatenate all predictions
