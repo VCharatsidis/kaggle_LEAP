@@ -94,8 +94,7 @@ val_loader = DataLoader(val_dataset,
                         )
 
 
-# eval_generate_model_seq_2_seq(min_std, True, model, val_loader, min_loss, 0, 0, 0, 0, model_name, mean_y, std_y)
-
+patience, min_loss = eval_generate_model_seq_2_seq(5, min_std, True, model, val_loader, min_loss, 0, 0, 0, 0, model_name, mean_y, std_y)
 
 patience = 0
 epoch = 0
@@ -109,7 +108,7 @@ batches = reader.next_batches(20)
 
 #patience, min_loss = eval_generate_model_seq_2_seq(min_std, True, model, val_loader, min_loss, patience, epoch, 0, 0, model_name, mean_y, std_y)
 
-
+up_to = 400
 print("batches:", len(batches), "shapes:", [batch.shape for batch in batches])
 start_from = 8
 criterion = nn.MSELoss()  # Using MSE for regression
@@ -138,8 +137,8 @@ while patience < num_epochs:
         steps = 0
         train_time_start = time.time()
         for batch_idx, (src, tgt) in enumerate(train_loader):
-            if batch_idx % 10 == 0:
-                print("batch_idx:", batch_idx)
+            if (batch_idx % 10 == 0) and (steps > 0):
+                print("batch_idx:", batch_idx, "loss:", total_loss / steps)
 
             optimizer.zero_grad()
             preds = model(src, tgt)
@@ -165,7 +164,7 @@ while patience < num_epochs:
                 total_loss = 0  # Reset the loss for the next steps
                 steps = 0  # Reset step count
 
-                patience, min_loss = eval_generate_model_seq_2_seq(min_std, True, model, val_loader, min_loss, patience, epoch, counter, iterations, model_name, mean_y, std_y)
+        patience, min_loss = eval_generate_model_seq_2_seq(up_to, min_std, True, model, val_loader, min_loss, patience, epoch, counter, iterations, model_name, mean_y, std_y)
 
         # patience, min_loss = eval_model_seq_2_seq(min_std, True, model, val_loader, min_loss,
         #                                 patience, epoch, counter, iterations, model_name, mean_y, std_y)

@@ -1,8 +1,8 @@
 # Hyperparameters and model instantiation
 input_dim = 25  # Number of input features
 output_dim = 368  # Number of target features
-d_model = 256
-nhead = 1
+d_model = 128
+nhead = 2
 num_encoder_layers = 1
 num_decoder_layers = 1
 dim_feedforward = 256

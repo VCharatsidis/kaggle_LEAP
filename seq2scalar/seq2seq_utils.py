@@ -183,16 +183,16 @@ def eval_model_seq_2_seq(min_std, weighted, model, val_loader, min_loss, patienc
     return patience, min_loss
 
 
-def eval_generate_model_seq_2_seq(min_std, weighted, model, val_loader, min_loss, patience, epoch, counter, iterations, model_name, mean_y, std_y):
+def eval_generate_model_seq_2_seq(up_to, min_std, weighted, model, val_loader, min_loss, patience, epoch, counter, iterations, model_name, mean_y, std_y):
     model.eval()
     with torch.no_grad():
         val_loss = []
         val_time_start = time.time()
         for idx, (src, tgt) in enumerate(val_loader):
-            if idx % 10 == 0:
+            if idx % 50 == 0:
                 print("val idx:", idx)
 
-            if idx > 200:
+            if idx > up_to:
                 break
 
             val_preds = model.generate(src, 60)
@@ -223,7 +223,7 @@ def eval_generate_model_seq_2_seq(min_std, weighted, model, val_loader, min_loss
 
         val_time_end = time.time()
 
-        avg_val_loss = sum(val_loss) / len(this_val_loss)
+        avg_val_loss = sum(val_loss) / len(val_loss)
         #scheduler.step()  # Adjust learning rate
 
         if avg_val_loss < min_loss:
