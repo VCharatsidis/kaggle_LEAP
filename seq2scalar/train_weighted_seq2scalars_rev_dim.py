@@ -8,8 +8,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from modified_seq_to_scalar_positional import ModifiedSequenceToScalarTransformer_positional
-from modified_seq_to_scalars import ModifiedSequenceToScalarTransformer
-from seq_to_scalars_transformer import SequenceToScalarTransformer
+
 from seq2scalar.nn_architecture.simple_transformer import SimpleTransformerModel
 from seq2scalar.nn_architecture.transformer import TransformerSeq2Seq
 from seq2seq_utils import seq2scalar_32, count_parameters, eval_model, collate_fn, seq2scalar_32_rev
@@ -61,12 +60,12 @@ chunk_size = 500000  # Define the size of each batch
 
 model_name = f'seq2scalar_weighted_32_positional_{min_std}_reverse.model'
 
-#model = torch.load(f"models/{model_name}")
-# model = model.double()
+model = torch.load(f"models/{model_name}")
+
 
 input_dim = 60
 seq_length = 25
-model = ModifiedSequenceToScalarTransformer_positional(input_dim, output_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
+#model = ModifiedSequenceToScalarTransformer_positional(input_dim, output_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
 
 print(f'The model has {count_parameters(model):,} trainable parameters')
 
@@ -144,15 +143,16 @@ while patience < num_epochs:
         total_loss = 0
         steps = 0
         train_time_start = time.time()
+        mask = std_y < (1.1 * min_std)
         for batch_idx, (src, tgt) in enumerate(train_loader):
             # if batch_idx > 500:
             #     break
 
             optimizer.zero_grad()
             preds = model(src)
-            preds[:, std_y < (1.1 * min_std)] *= 0
+            preds[:, mask] *= 0
 
-            loss = r2_score(preds, tgt)
+            loss = criterion(preds, tgt)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()

@@ -1,27 +1,30 @@
 import torch
 
-# Example tensor with shape (16, 60, 14)
-tensor_data = torch.rand(16, 60, 14)
+# Sample tensors
+preds = torch.randn(100, 10, requires_grad=True)  # Example prediction tensor
+tgt = torch.randn(100, 10, requires_grad=True)    # Example target tensor
+logs = [0, 2, 4]                                 # Indices to be transformed
+log_shifts = torch.randn(10)                     # Example log shifts
 
-# Number of variables for which we need to compute the mean along dim=2
-scalar_vars_num = 6
-vector_vars_num = 8
+# Convert the list of indices to a boolean mask
+mask = torch.zeros(preds.shape[1], dtype=torch.bool)
+mask[logs] = True
 
-# Slice the tensor to get the first 6 variables and the last 8 variables
-vector_vars = tensor_data[:, :, :scalar_vars_num]
-scalar_vars = tensor_data[:, :, -vector_vars_num:]
+# Apply the exponential transformation and shift
+exp_preds = torch.exp(preds[:, mask]) - log_shifts[mask]
+exp_tgt = torch.exp(tgt[:, mask]) - log_shifts[mask]
 
-# Compute the mean along dim=1, excluding the first 6 that are vector vars
-mean_vars = scalar_vars.mean(dim=1, keepdim=True).squeeze(dim=1)
+# Create copies of preds and tgt to avoid in-place operations
+new_preds = preds.clone()
+new_tgt = tgt.clone()
 
-print(vector_vars.shape, mean_vars.shape)  # Should print (16, 60, 6) (16, 1, 8
-vector_vars = vector_vars.reshape(vector_vars.size(0), -1)  # shape: [batch_size, seq_len * d_model]
+# Update the selected columns in new_preds and new_tgt
+new_preds[:, mask] = exp_preds
+new_tgt[:, mask] = exp_tgt
 
-print(vector_vars.shape, mean_vars.shape)  # Should print (16, 60, 6
-# Concatenate the first variables and the mean variables along dim=2
-concatenated = torch.cat((vector_vars, mean_vars), dim=1)
+# Example backward pass
+loss = torch.mean(new_preds + new_tgt)  # Example loss function
+loss.backward()  # Perform backpropagation
 
-# Flatten the tensor along the second and third dimensions
-flattened = concatenated.view(concatenated.size(0), -1)
-
-print(flattened.shape)  # Should print (16, 60*6 +
+print(new_preds)
+print(new_tgt)

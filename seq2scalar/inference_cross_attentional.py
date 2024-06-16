@@ -5,8 +5,7 @@ import pandas as pd
 import torch
 from seq2seq_utils import to_tensor
 import polars as pl
-from constants import seq_variables_x, scalar_variables_x
-
+from constants import seq_variables_x, scalar_variables_x, input_variable_order
 
 train_file = '../data/train.csv'
 # Read only the first row (header) to get column names
@@ -33,8 +32,8 @@ column_names = df_header.columns
 num_columns = len(column_names)
 print("num columns:", num_columns)
 
-model_name = f'models/seq2scalar_weighted_32_positional_{min_std}.model'
-
+#model_name = f'models/seq2scalar_weighted_32_positional_{min_std}.model'
+model_name = "models/cross_attentional_1e-12_2.model"
 model = torch.load(model_name)
 
 
@@ -62,6 +61,21 @@ print("test data:", tensor_data.shape)
 # tensor_data = tensor_data[:25000]
 
 
+def get_feature_data(tensor_data, variable_order_indices):
+    # Reshape and reorder to N, 25, 60
+    tensor_data = tensor_data.permute(0, 2, 1)  # Change to N, 25, 60
+    tensor_data_ordered = tensor_data[:, variable_order_indices, :]  # Reorder the second dimension as per the desired order
+
+    # The tensor_data_ordered is now in the shape N, 25, 60 with variables ordered as specified
+    return tensor_data_ordered
+
+
+# Map the desired order of variables to their indices in the original tensor
+variable_order_indices = [
+    seq_variables_x.index(var) if var in seq_variables_x else len(seq_variables_x) + scalar_variables_x.index(var)
+    for var in input_variable_order]
+
+
 def collect_predictions_in_batches(model, input_data_test, batch_size):
     start_time = time.time()
     model.eval()  # Set model to evaluation mode
@@ -73,7 +87,8 @@ def collect_predictions_in_batches(model, input_data_test, batch_size):
             print(i)
             # Select batch of samples
             batch = input_data_test[i:i+batch_size]
-            preds = model(batch)
+            src_2 = get_feature_data(batch, variable_order_indices)
+            preds = model(batch, src_2)
             all_predictions.append(preds.cpu().numpy())
 
     # Concatenate all predictions
@@ -98,7 +113,7 @@ print(sub.columns.to_list())
 print(len(sub.columns.to_list()))
 
 print(sub.iloc[:, 1:].shape)
-sub.iloc[:, 1:] = test_preds
+sub.iloc[:, 1:] *= test_preds
 
 test_polars = pl.from_pandas(sub[["sample_id"] + TARGET_COLS])
 
@@ -109,5 +124,5 @@ REPLACE_TO = ['state_q0002_0', 'state_q0002_1', 'state_q0002_2', 'state_q0002_3'
 
 
 print(test_polars.shape)
-test_polars.write_csv("cross_seq_to_scalar_weighted_sub.csv")
+test_polars.write_csv("cross_seq_to_scalar_weighted_sub_2.csv")
 print("inference done!")

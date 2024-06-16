@@ -62,7 +62,7 @@ val_dataset, _ = seq2scalar_32(True, val_data, FEAT_COLS, TARGET_COLS, mean_x, s
 
 print("val dataset:", val_data.shape)
 val_loader = DataLoader(val_dataset,
-                        batch_size=50000,
+                        batch_size=1000,
                         shuffle=False,
                         )
 
@@ -70,6 +70,7 @@ val_loader = DataLoader(val_dataset,
 model.eval()
 with torch.no_grad():
     val_loss = torch.zeros([len(TARGET_COLS)], dtype=torch.float64).cuda()
+    sum_val_preds = torch.zeros([len(TARGET_COLS)], dtype=torch.float32).cuda()
 
     for src, tgt in val_loader:
         val_preds = model(src)
@@ -86,11 +87,14 @@ with torch.no_grad():
         tgt = torch.tensor(tgt, dtype=torch.float64).cuda()
         val_preds = torch.tensor(val_preds, dtype=torch.float64).cuda()
 
-        this_loss = ((tgt - val_preds) ** 2).sum(dim=0)
-        val_loss += this_loss
+        ss_res = (tgt - val_preds) ** 2
+        score = torch.sum(ss_res, dim=0)
+
+        val_loss += score
 
     print(val_loss.shape)
     mean_val = val_loss / val_data.shape[0]
+    print(mean_val.shape)
 
     for i in range(len(TARGET_COLS)):
         print(TARGET_COLS[i], round(mean_val[i].item(), 5), round(TARGET_WEIGHTS[i], 5))

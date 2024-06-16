@@ -10,11 +10,11 @@ from torch.utils.data import DataLoader
 from modified_seq_to_scalar_positional import ModifiedSequenceToScalarTransformer_positional
 from seq2scalar.nn_architecture.simple_transformer import SimpleTransformerModel
 from seq2scalar.nn_architecture.transformer import TransformerSeq2Seq
-from seq2seq_utils import seq2scalar_32, count_parameters, eval_model, collate_fn
+from seq2seq_utils import seq2scalar_32, count_parameters, eval_model_weighted, collate_fn, just_eval
 from neural_net.utils import r2_score
 import polars as pl
-from constants import BATCH_SIZE, LEARNING_RATE, seq_variables_x, \
-    scalar_variables_x, seq_variables_y, scalar_variables_y, seq_length
+from constants import seq_variables_x, \
+    scalar_variables_x, seq_variables_y, scalar_variables_y, seq_length, TARGET_WEIGHTS
 from transformer_constants import input_dim, output_dim, d_model, nhead, num_encoder_layers, num_decoder_layers, \
     dim_feedforward, dropout
 
@@ -60,8 +60,6 @@ chunk_size = 500000  # Define the size of each batch
 model_name = f'seq2scalar_weighted_32_positional_{min_std}.model'
 
 model = torch.load(f"models/{model_name}")
-# model = model.double()
-# model = ModifiedSequenceToScalarTransformer(input_dim, output_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
 
 #model = ModifiedSequenceToScalarTransformer_positional(input_dim, output_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
 
@@ -72,7 +70,9 @@ print("num params:", sum(p.numel() for p in model.parameters() if p.requires_gra
 # optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
 # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.3, patience=6, verbose=False)
 
-optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+BATCH_SIZE = 254
+LEARNING_RATE = 2e-5
+optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
 # scheduler = optim.lr_scheduler.PolynomialLR(optimizer, power=1.0, total_iters=5)
 
 num_training_steps = 20000  # Total number of training steps
@@ -82,7 +82,7 @@ num_warmup_steps = 100     # Number of steps to warm up the learning rate
 #                                             num_warmup_steps=num_warmup_steps,
 #                                             num_training_steps=num_training_steps)
 
-min_loss = 10000000000000
+
 # Example of processing each chunk
 
 val_data = pl.read_csv("../data/validation_set.csv")
@@ -91,11 +91,14 @@ val_dataset, _ = seq2scalar_32(True, val_data, FEAT_COLS, TARGET_COLS, mean_x, s
 
 print("val dataset:", val_data.shape)
 val_loader = DataLoader(val_dataset,
-                        batch_size=8 * BATCH_SIZE,
+                        batch_size=BATCH_SIZE,
                         shuffle=False,
                         # num_workers=4,
                         # pin_memory=True
                         )
+
+min_loss = just_eval(model, std_y, min_std, val_loader, True, mean_y)
+#min_loss = 0.376216012832
 
 patience = 0
 epoch = 0
@@ -108,17 +111,12 @@ batches = reader.next_batches(20)
 # batches = [train_sample]
 
 print("batches:", len(batches), "shapes:", [batch.shape for batch in batches])
-start_from = 8
+
 criterion = nn.MSELoss()  # Using MSE for regression
-while patience < num_epochs:
+while patience < 100:
     counter = 0
     iterations = 0
     for idx, df in enumerate(batches):
-        # if idx < start_from:
-        #     continue
-        # else:
-        #     counter = start_from
-        #     start_from = 0
 
         prep_chunk_time_start = time.time()
 
@@ -141,13 +139,14 @@ while patience < num_epochs:
         total_loss = 0
         steps = 0
         train_time_start = time.time()
+        mask = std_y < (1.1 * min_std)
         for batch_idx, (src, tgt) in enumerate(train_loader):
             # if batch_idx > 500:
             #     break
 
             optimizer.zero_grad()
             preds = model(src)
-            preds[:, std_y < (1.1 * min_std)] *= 0
+            preds[:, mask] *= 0
 
             loss = criterion(preds, tgt)
             loss.backward()
@@ -166,7 +165,7 @@ while patience < num_epochs:
                 total_loss = 0  # Reset the loss for the next steps
                 steps = 0  # Reset step count
 
-        patience, min_loss = eval_model(min_std, True, model, val_loader, min_loss,
+        patience, min_loss = eval_model_weighted(min_std, True, model, val_loader, min_loss,
                                         patience, epoch, counter, iterations, model_name, mean_y, std_y)
 
         for param_group in optimizer.param_groups:
