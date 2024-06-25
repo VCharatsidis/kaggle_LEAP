@@ -1,30 +1,30 @@
-import torch
+import numpy as np
+import polars as pl
 
-# Sample tensors
-preds = torch.randn(100, 10, requires_grad=True)  # Example prediction tensor
-tgt = torch.randn(100, 10, requires_grad=True)    # Example target tensor
-logs = [0, 2, 4]                                 # Indices to be transformed
-log_shifts = torch.randn(10)                     # Example log shifts
 
-# Convert the list of indices to a boolean mask
-mask = torch.zeros(preds.shape[1], dtype=torch.bool)
-mask[logs] = True
 
-# Apply the exponential transformation and shift
-exp_preds = torch.exp(preds[:, mask]) - log_shifts[mask]
-exp_tgt = torch.exp(tgt[:, mask]) - log_shifts[mask]
+train_file = 'data/train_set_2.csv'
+# Read only the first row (header) to get column names
+df_header = pl.read_csv(train_file, has_header=True, skip_rows=0, n_rows=100)
+FEAT_COLS = df_header.columns[1:557]
+TARGET_COLS = df_header.columns[557:]
 
-# Create copies of preds and tgt to avoid in-place operations
-new_preds = preds.clone()
-new_tgt = tgt.clone()
+from constants import TARGET_WEIGHTS
 
-# Update the selected columns in new_preds and new_tgt
-new_preds[:, mask] = exp_preds
-new_tgt[:, mask] = exp_tgt
+mean_y = np.load("data/means_y.npy")
+for idx, col in enumerate(TARGET_COLS):
+    print(idx, col, mean_y[idx])
 
-# Example backward pass
-loss = torch.mean(new_preds + new_tgt)  # Example loss function
-loss.backward()  # Perform backpropagation
+input()
 
-print(new_preds)
-print(new_tgt)
+REPLACE_TO = ['ptend_q0002_0', 'ptend_q0002_1', 'ptend_q0002_2', 'ptend_q0002_3', 'ptend_q0002_4', 'ptend_q0002_5', 'ptend_q0002_6', 'ptend_q0002_7', 'ptend_q0002_8', 'ptend_q0002_9', 'ptend_q0002_10', 'ptend_q0002_11', 'ptend_q0002_12', 'ptend_q0002_13', 'ptend_q0002_14', 'ptend_q0002_15', 'ptend_q0002_16', 'ptend_q0002_17', 'ptend_q0002_18', 'ptend_q0002_19', 'ptend_q0002_20', 'ptend_q0002_21', 'ptend_q0002_22', 'ptend_q0002_23', 'ptend_q0002_24', 'ptend_q0002_25', 'ptend_q0002_26']
+
+my_weights = []
+for idx, col in enumerate(TARGET_COLS):
+    print(idx, col, TARGET_WEIGHTS[idx])
+    if col in REPLACE_TO:
+        my_weights.append(0)
+    else:
+        my_weights.append(TARGET_WEIGHTS[idx])
+
+print(my_weights)

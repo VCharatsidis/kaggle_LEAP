@@ -6,18 +6,20 @@ import polars as pl
 import numpy as np
 import torch
 
-from constants import seq_variables_x, scalar_variables_x, TARGET_WEIGHTS
+from constants import seq_variables_x, scalar_variables_x, OFFICIAL_TARGET_WEIGHTS
 from seq2seq_utils import to_tensor, get_feature_data
 
-# Define the path to your pickle file
-pickle_file_path = 'transforms_weightless.pickle'
+mean_x = np.load("../data/means_x.npy")
+std_x = np.load("../data/std_x.npy")
 
-# Load the pickle file
-with open(pickle_file_path, 'rb') as handle:
-    transforms = pickle.load(handle)
+mean_y = np.load("../data/means_y.npy")
+std_y = np.load("../data/std_y.npy")
 
-model_name = "models/cross_attentional_1e-12_nhead_8_enc_l_6_d_256_custom_norm_weightless_weighted_train_new.model"
-model_name = "models/simple_encoder_1e-12_nhead_8_enc_l_9_d_256_custom_norm_weightless_weighted_train_set_2.model"
+min_std = 1e-12
+std_y = np.clip(std_y, a_min=min_std, a_max=None)
+std_x = np.clip(std_x, a_min=min_std, a_max=None)
+
+model_name = "models/cross_attention_1e-12_nhead_8_enc_l_9_d_256_weightless_train_set_2.model"
 model = torch.load(model_name)
 model.eval()
 
@@ -27,37 +29,8 @@ df_header = pl.read_csv(train_file, has_header=True, skip_rows=0, n_rows=0)
 FEAT_COLS = df_header.columns[1:557]
 TARGET_COLS = df_header.columns[557:]
 
-log_shifts = {}
-inverse_log_shifts = {}
-logs = []
-inverse_log = []
-stds = []
-means = []
-shifts = []
-for t in TARGET_COLS:
-    if t not in transforms.keys():
-        continue
-
-    type, (mean, std), shift = transforms[t]
-
-    shifts.append(shift)
-    stds.append(std)
-    means.append(mean)
-
-    index = TARGET_COLS.index(t)
-    if type == "log":
-        log_shifts[index] = shift
-        logs.append(index)
-
-    print("Target", index, t, transforms[t])
-
-stds = np.array(stds)
-means = np.array(means)
-
 
 test_file = '../data/test.csv'
-
-min_std = 1e-51
 
 
 def collect_predictions_in_batches(model):
@@ -65,7 +38,6 @@ def collect_predictions_in_batches(model):
     model.eval()  # Set model to evaluation mode
     all_predictions = []
 
-    mask = stds < (1.1 * min_std)
     chunk_size = 5000
     counter = 0
 
@@ -85,21 +57,10 @@ def collect_predictions_in_batches(model):
 
             # Preprocess the features and target columns
             for col in FEAT_COLS:
-                X = val_df.select(FEAT_COLS).with_columns(pl.col(col).cast(pl.Float64))
+                X = val_df.select(FEAT_COLS).with_columns(pl.col(col).cast(pl.Float32))
 
-            # Normalize features
-            for i, col in enumerate(FEAT_COLS):
-                type, (mean, std), shift = transforms[col]
-                if type == 'none':
-                    continue
-
-                if std < 1.1 * min_std:
-                    std = min_std
-
-                if type == "log":
-                    X = X.with_columns((((pl.col(col) + shift).log() - mean) / std))
-                else:
-                    X = X.with_columns(((pl.col(col) - mean) / std))
+                # Normalize features
+            X = X.with_columns([(pl.col(col) - mean_x[i]) / std_x[i] for i, col in enumerate(FEAT_COLS)])
 
             # Reshape the features into the desired shape [batch_size, 60, 25]
             batch_size = X.shape[0]
@@ -116,16 +77,9 @@ def collect_predictions_in_batches(model):
                 batch = tensor_data[i:i + batch_size]
                 val_preds = model(batch)
 
-                val_preds[:, mask] = 0
-
                 val_preds = val_preds.cpu().numpy()
-                val_preds = (val_preds * stds + means)
-
-                for i in range(val_preds.shape[1]):
-                    if i in logs:
-                        val_preds[:, i] = np.exp(val_preds[:, i]) - log_shifts[i]
-
-                val_preds = val_preds * TARGET_WEIGHTS
+                val_preds = val_preds * std_y + mean_y
+                val_preds = val_preds * OFFICIAL_TARGET_WEIGHTS
 
                 all_predictions.append(val_preds)
 
@@ -140,11 +94,14 @@ print("test predictions shape:", test_preds.shape)
 
 df_p_test = pd.DataFrame(test_preds, columns=TARGET_COLS)
 
+REPLACE_TO = ['ptend_q0002_0', 'ptend_q0002_1', 'ptend_q0002_2', 'ptend_q0002_3', 'ptend_q0002_4', 'ptend_q0002_5', 'ptend_q0002_6', 'ptend_q0002_7', 'ptend_q0002_8', 'ptend_q0002_9', 'ptend_q0002_10', 'ptend_q0002_11', 'ptend_q0002_12', 'ptend_q0002_13', 'ptend_q0002_14', 'ptend_q0002_15', 'ptend_q0002_16', 'ptend_q0002_17', 'ptend_q0002_18', 'ptend_q0002_19', 'ptend_q0002_20', 'ptend_q0002_21', 'ptend_q0002_22', 'ptend_q0002_23', 'ptend_q0002_24', 'ptend_q0002_25', 'ptend_q0002_26']
+REPLACE_FROM = ['state_q0002_0', 'state_q0002_1', 'state_q0002_2', 'state_q0002_3', 'state_q0002_4', 'state_q0002_5', 'state_q0002_6', 'state_q0002_7', 'state_q0002_8', 'state_q0002_9', 'state_q0002_10', 'state_q0002_11', 'state_q0002_12', 'state_q0002_13', 'state_q0002_14', 'state_q0002_15', 'state_q0002_16', 'state_q0002_17', 'state_q0002_18', 'state_q0002_19', 'state_q0002_20', 'state_q0002_21', 'state_q0002_22', 'state_q0002_23', 'state_q0002_24', 'state_q0002_25', 'state_q0002_26']
+
 df_test = pd.read_csv(test_file)
-for idx in range(12, 15):
+for idx in range(0, 27):
     df_p_test[f"ptend_q0002_{idx}"] = -df_test[f"state_q0002_{idx}"].to_numpy() / 1200
 
-test_preds = df_p_test.values
+test_preds = df_p_test.values * OFFICIAL_TARGET_WEIGHTS
 
 sub = pd.read_csv("../data/sample_submission.csv")
 print(sub.columns.to_list())
@@ -158,6 +115,6 @@ test_polars = pl.from_pandas(sub[["sample_id"] + TARGET_COLS])
 # REPLACEMENT COLUMNS
 
 print(test_polars.shape)
-test_polars.write_csv("submissions/simple_seq_to_scalar.csv")
+test_polars.write_csv("submissions/weightless_last_no_replacement.csv")
 print("inference done!")
 

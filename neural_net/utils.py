@@ -4,6 +4,71 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 
+def collate_fn(batch):
+    data, targets = zip(*batch)
+    data = torch.stack(data, dim=0)
+    targets = torch.stack(targets, dim=0)
+    return data, targets
+
+
+def get_val_loss(model, all_preds, all_targets, start_idx, means, stds, val_loader):
+    with torch.no_grad():
+        for src, tgt in val_loader:
+            val_preds = model(src)
+
+            val_preds = val_preds.cpu().numpy()
+            tgt = tgt.cpu().numpy()
+
+            val_preds = val_preds * stds + means
+            tgt = tgt * stds + means
+
+            batch_size = tgt.shape[0]
+            all_targets[start_idx: start_idx + batch_size] = tgt
+            all_preds[start_idx: start_idx + batch_size] = val_preds
+            start_idx += batch_size
+
+        return all_preds, all_targets, start_idx
+
+
+
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+# Custom Dataset Class
+class CustomDataset(Dataset):
+    def __init__(self, data, target):
+        self.data = data
+        self.target = target
+
+    def __len__(self):
+        return self.data.size(0)
+
+    def __getitem__(self, idx):
+        return self.data[idx], self.target[idx]
+
+
+def mlp_data_32(df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y):
+    # Preprocess the features and target columns
+    for col in FEAT_COLS:
+        X = df.select(FEAT_COLS).with_columns(pl.col(col).cast(pl.Float32))
+    for col in TARGET_COLS:
+        y = df.select(TARGET_COLS).with_columns(pl.col(col).cast(pl.Float32))
+
+    X, y = X.to_numpy(), y.to_numpy()
+
+    # Normalize features
+    X = (X - mean_x) / std_x
+    y = (y - mean_y) / std_y
+
+    tensor_data = torch.tensor(X, dtype=torch.float32).cuda()
+    tensor_target = torch.tensor(y, dtype=torch.float32).cuda()
+
+    # Create an instance of the dataset
+    dataset = CustomDataset(tensor_data, tensor_target)
+
+    return dataset, tensor_data
+
+
 class NumpyDataset(Dataset):
     def __init__(self, x, y):
         """

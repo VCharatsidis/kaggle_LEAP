@@ -38,7 +38,7 @@ class CrossAttention(nn.Module):
 
 
 class CrossAttentionModel(nn.Module):
-    def __init__(self, seq_length, feature_dim, d_model, nhead, num_encoder_layers, dim_feedforward, output_dim, dropout=0.1):
+    def __init__(self, seq_length, feature_dim, d_model, nhead, num_encoder_layers, dim_feedforward, output_dim, dropout=0):
         super(CrossAttentionModel, self).__init__()
 
         # Encoders
@@ -67,7 +67,9 @@ class CrossAttentionModel(nn.Module):
         # Output layer
         self.output_linear = nn.Linear(d_model * feature_dim + d_model * seq_length, output_dim)  # Adjust output layer size
 
-    def forward(self, src1, src2):
+    def forward(self, src1):
+        # Reshape and reorder to N, 25, 60
+        src2 = src1.permute(0, 2, 1)  # Change to N, 25, 60
         # Prepare inputs
         src1 = self.input_adapter1(src1)  # N, 60, 25 -> N, 60, d_model
         src2 = self.input_adapter2(src2)  # N, 25, 60 -> N, 25, d_model

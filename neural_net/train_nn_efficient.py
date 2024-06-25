@@ -53,15 +53,14 @@ def preprocess():
     hidden_dim = 1000
     num_layers = 9
     output_dim = len(TARGET_COLS)
-    LEARNING_RATE = 1.3e-4
+    LEARNING_RATE = 0.7e-4
     BATCH_SIZE = 256
 
-    model = GLU_MLP(input_dim, hidden_dim, output_dim, num_layers).cuda()
+    #model = GLU_MLP(input_dim, hidden_dim, output_dim, num_layers).cuda()
 
     model_name = f'glu_mlp_{min_std}_l_{num_layers}_d_{hidden_dim}_weightless_train_set_2'
 
-    #model = torch.load(f"models/{model_name}.model")
-
+    model = torch.load(f"models/{model_name}.model")
 
     print(f'The model has {count_parameters(model):,} trainable parameters')
     print("num params:", sum(p.numel() for p in model.parameters() if p.requires_grad))
@@ -69,7 +68,7 @@ def preprocess():
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
 
     num_warmup_steps = 100
-    num_training_steps = 400000
+    num_training_steps = 800000
 
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
@@ -162,7 +161,7 @@ def eval_cross_attention_weightless(model, min_loss, patience, epoch, counter, i
               "iterations:", iterations, "val loss:", loss, "time:", val_time_end - val_time_start)
         patience += 1
 
-    return patience, min_loss
+    return patience, min_loss, loss
 
 
 def train():
@@ -174,36 +173,39 @@ def train():
     print("Initial validation loss:", min_loss, "time:", end_eval - start_eval)
     time.sleep(1)
 
-    tensor_mean_y = torch.tensor(mean_y).cuda()
-    tensor_std_y = torch.tensor(std_y).cuda()
+    # tensor_mean_y = torch.tensor(mean_y).cuda()
+    # tensor_std_y = torch.tensor(std_y).cuda()
 
     patience = 0
     r2_denom = np.load("../data/r2_denominator.npy")
     r2_denom = r2_denom * TARGET_WEIGHTS + (1 - TARGET_WEIGHTS)
+    # for i, col in enumerate(TARGET_COLS):
+    #     print(col, r2_denom[i], TARGET_WEIGHTS[i])
+
     r2_denom = torch.tensor(r2_denom).cuda()
 
     Targets_norm = torch.tensor(TARGET_WEIGHTS).cuda()
-    criterion = nn.MSELoss()  # Using MSE for regression
+    # criterion = nn.MSELoss()  # Using MSE for regression
     epoch = 0
     iterations = 0
     while True:
         reader = pl.read_csv_batched(train_file, batch_size=chunk_size)
         counter = 0
 
-        while True:
+        prep_chunk_time_start = time.time()
+        try:
+            batches = reader.next_batches(20)
+            if batches[0] is None:
+                break  # No more data to read
+        except:
+            break
 
-            prep_chunk_time_start = time.time()
-            try:
-                df = reader.next_batches(1)[0]
-                if df is None:
-                    break  # No more data to read
-            except:
-                break
+        end_batches = time.time()
+        print("end batches time:", end_batches - prep_chunk_time_start)
 
-            # if (epoch == 0) and (counter < 1):
-            #     counter += 1
-            #     continue
+        for df in batches:
 
+            start_chunk_time = time.time()
             train_dataset, _ = mlp_data_32(df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y)
 
             train_loader = DataLoader(train_dataset,
@@ -214,7 +216,7 @@ def train():
 
             prep_chunk_time_end = time.time()
 
-            print("epoch:", epoch, "chunk:", counter, "prep chunk time:", prep_chunk_time_end - prep_chunk_time_start)
+            print("epoch:", epoch, "chunk:", counter, "prep chunk time:", prep_chunk_time_end - start_chunk_time)
 
             total_loss = 0
             steps = 0
@@ -259,17 +261,15 @@ def train():
                     steps = 0  # Reset step count
                     #time.sleep(4)
 
-            if counter % 25 == 0:
-                patience, min_loss = eval_cross_attention_weightless(model, min_loss, patience, epoch, counter, iterations, model_name, validation_size, chunk_size, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, BATCH_SIZE)
-                #time.sleep(5)
-
-            for param_group in optimizer.param_groups:
-                print(f"Epoch {epoch}, end of chunk {counter}, Learning Rate: {param_group['lr']}")
-
-            print()
             counter += 1
 
-        epoch += 1
+        patience, min_loss, _ = eval_cross_attention_weightless(model, min_loss, patience, epoch, counter, iterations, model_name, validation_size, chunk_size, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, BATCH_SIZE)
+
+        for param_group in optimizer.param_groups:
+            print(f"Epoch {epoch}, end of chunk {counter}, Learning Rate: {param_group['lr']}")
+        print()
+
+    epoch += 1
 
 
 train()

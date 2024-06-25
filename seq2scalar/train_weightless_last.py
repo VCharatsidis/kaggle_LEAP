@@ -8,9 +8,14 @@ import polars as pl
 from torch.utils.data import DataLoader
 from decimal import Decimal
 
-from glu_mlp import GLU_MLP
-from neural_net.utils import mlp_data_32, count_parameters, get_val_loss, collate_fn
-from constants import TARGET_WEIGHTS
+from cross_attention import CrossAttentionModel
+from modified_seq_to_scalar_positional import ModifiedSequenceToScalarTransformer_positional
+from neural_net.utils import r2_score
+from seq2seq_utils import seq2scalar_32, count_parameters, collate_fn, seq2scalar_custom_norm, \
+    seq2scalar_custom_norm_weightless, get_feature_data, get_val_loss_cross_attention_weightless
+from constants import seq_variables_x, scalar_variables_x, seq_variables_y, scalar_variables_y, seq_length, \
+    input_variable_order, TARGET_WEIGHTS
+
 from transformers import get_linear_schedule_with_warmup
 
 
@@ -49,18 +54,21 @@ def preprocess():
     if start_from > 0:
         print("WARNING: Starting from chunk:", start_from)
 
-    input_dim = len(FEAT_COLS)
-    hidden_dim = 1000
-    num_layers = 9
-    output_dim = len(TARGET_COLS)
-    LEARNING_RATE = 1.3e-4
+    feature_dim = 25
+    d_model = 256
+    nhead = 8
+    num_encoder_layers = 9
+    dim_feedforward = 256
+    output_dim = 368
+    dropout = 0.0
+    LEARNING_RATE = 6.8e-5
     BATCH_SIZE = 256
+    #model = ModifiedSequenceToScalarTransformer_positional(feature_dim, output_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
+    #model = CrossAttentionModel(seq_length, feature_dim, d_model, nhead, num_encoder_layers, dim_feedforward, output_dim, dropout).cuda()
 
-    model = GLU_MLP(input_dim, hidden_dim, output_dim, num_layers).cuda()
+    model_name = f'cross_attention_{min_std}_nhead_{nhead}_enc_l_{num_encoder_layers}_d_{d_model}_weightless_train_set_2'
 
-    model_name = f'glu_mlp_{min_std}_l_{num_layers}_d_{hidden_dim}_weightless_train_set_2'
-
-    #model = torch.load(f"models/{model_name}.model")
+    model = torch.load(f"models/{model_name}.model")
 
 
     print(f'The model has {count_parameters(model):,} trainable parameters')
@@ -98,14 +106,15 @@ def memory_eff_eval(validation_size, chunk_size, FEAT_COLS, TARGET_COLS, mean_x,
         except:
             break
 
-        val_dataset, _ = mlp_data_32(val_df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y)
+        val_dataset, _ = seq2scalar_32(val_df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x, scalar_variables_x)
 
         val_loader = DataLoader(val_dataset,
                                 batch_size=BATCH_SIZE,
                                 shuffle=False,
                                 )
 
-        all_preds, all_targets, start_idx = get_val_loss(model, all_preds, all_targets, start_idx, mean_y, std_y, val_loader)
+        all_preds, all_targets, start_idx = get_val_loss_cross_attention_weightless(model, all_preds, all_targets, start_idx, mean_y, std_y, val_loader)
+        time.sleep(2)
 
     all_preds *= TARGET_WEIGHTS
     all_targets *= TARGET_WEIGHTS
@@ -134,10 +143,13 @@ def memory_eff_eval(validation_size, chunk_size, FEAT_COLS, TARGET_COLS, mean_x,
     #mean_denom_r2 = np.mean(ss_tot_vector, axis=0) * TARGET_WEIGHTS + (1 - TARGET_WEIGHTS)
     mean_r2 = np.sum(ss_res_vector, axis=0) / denom_r2
 
-    for i in range(len(TARGET_COLS)):
-        print(f"Target {i} {TARGET_COLS[i]} R2:", mean_r2[i], TARGET_WEIGHTS[i])
+    # for i in range(len(TARGET_COLS)):
+    #     print(f"Target {i} {TARGET_COLS[i]} R2:", mean_r2[i], TARGET_WEIGHTS[i],
+    #           "denom r2:", mean_denom_r2[i])
 
     print("MSE:", np.mean(ss_res_vector), "mean R2:", np.mean(mean_r2), "Fake R2:", ss_res/ss_tot)
+
+    #loss = ss_res / ss_tot
 
     loss = np.mean(mean_r2)
 
@@ -174,9 +186,6 @@ def train():
     print("Initial validation loss:", min_loss, "time:", end_eval - start_eval)
     time.sleep(1)
 
-    tensor_mean_y = torch.tensor(mean_y).cuda()
-    tensor_std_y = torch.tensor(std_y).cuda()
-
     patience = 0
     r2_denom = np.load("../data/r2_denominator.npy")
     r2_denom = r2_denom * TARGET_WEIGHTS + (1 - TARGET_WEIGHTS)
@@ -200,11 +209,11 @@ def train():
             except:
                 break
 
-            # if (epoch == 0) and (counter < 1):
+            # if (epoch == 0) and (counter < 32):
             #     counter += 1
             #     continue
 
-            train_dataset, _ = mlp_data_32(df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y)
+            train_dataset, _ = seq2scalar_32(df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x, scalar_variables_x)
 
             train_loader = DataLoader(train_dataset,
                                       batch_size=BATCH_SIZE,
@@ -257,11 +266,11 @@ def train():
                     print("epoch:", epoch, f', chunk: {counter}, Step {batch_idx + 1}, Training Loss: {total_loss / steps:.4f}', "iterations:", iterations, "time:", train_time_end - train_time_start)
                     total_loss = 0  # Reset the loss for the next steps
                     steps = 0  # Reset step count
-                    #time.sleep(4)
+                    time.sleep(8)
 
-            if counter % 25 == 0:
+            if counter % 10 == 0:
                 patience, min_loss = eval_cross_attention_weightless(model, min_loss, patience, epoch, counter, iterations, model_name, validation_size, chunk_size, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, BATCH_SIZE)
-                #time.sleep(5)
+                time.sleep(10)
 
             for param_group in optimizer.param_groups:
                 print(f"Epoch {epoch}, end of chunk {counter}, Learning Rate: {param_group['lr']}")

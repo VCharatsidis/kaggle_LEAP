@@ -443,12 +443,6 @@ def seq2seq_32(min_std, df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y
     return dataset, tensor_data
 
 
-# Map the desired order of variables to their indices in the original tensor
-variable_order_indices = [
-    seq_variables_x.index(var) if var in seq_variables_x else len(seq_variables_x) + scalar_variables_x.index(var)
-    for var in input_variable_order]
-
-
 def get_feature_data(tensor_data, variable_order_indices):
     # Reshape and reorder to N, 25, 60
     tensor_data = tensor_data.permute(0, 2, 1)  # Change to N, 25, 60
@@ -468,34 +462,28 @@ def seq2scalar_custom_norm_weightless(min_std, df, FEAT_COLS, TARGET_COLS, trans
 
     # Normalize features
     for i, col in enumerate(FEAT_COLS):
-        type, (mean, std), shift = transformations[col]
-        if type == 'none':
+        transformation_type, (mean, std), shift = transformations[col]
+        if transformation_type == 'none':
             continue
 
         if std < (1.1 * min_std):
             std = min_std
 
-        if type == "log":
+        if transformation_type == "log":
             X = X.with_columns((((pl.col(col) + shift).log() - mean) / std))
         else:
             X = X.with_columns(((pl.col(col) - mean) / std))
 
-    # Normalize features
-    stds = []
-    means = []
-    shifts = []
     for i, col in enumerate(TARGET_COLS):
-        type, (mean, std), shift = transformations[col]
-        shifts.append(shift)
-        stds.append(std)
-        means.append(mean)
-        if type == 'none':
+        transformation_type, (mean, std), shift = transformations[col]
+        if transformation_type == 'none':
             continue
 
         if std < (1.1 * min_std):
+            # print(col, "has std:", std, "weight:", TARGET_WEIGHTS[i])
             std = min_std
 
-        if type == "log":
+        if transformation_type == "log":
             y = y.with_columns((((pl.col(col) + shift).log() - mean) / std))
         else:
             y = y.with_columns(((pl.col(col) - mean) / std))
@@ -506,7 +494,6 @@ def seq2scalar_custom_norm_weightless(min_std, df, FEAT_COLS, TARGET_COLS, trans
 
     # Convert the numpy array to a PyTorch tensor
     tensor_data = to_tensor(X, batch_size, sequence_length, seq_variables_x, scalar_variables_x)
-    print("tensor_data input shape:", tensor_data.shape)
 
     y = y.to_numpy()
     tensor_target = torch.tensor(y, dtype=torch.float32).cuda()
@@ -514,7 +501,26 @@ def seq2scalar_custom_norm_weightless(min_std, df, FEAT_COLS, TARGET_COLS, trans
     # Create an instance of the dataset
     dataset = CustomDataset(tensor_data, tensor_target)
 
-    return dataset, tensor_data, np.array(stds), np.array(means), np.array(shifts)
+    return dataset, tensor_data
+
+
+def get_val_loss_cross_attention_weightless(model, all_preds, all_targets, start_idx, means, stds, val_loader):
+    with torch.no_grad():
+        for src, tgt in val_loader:
+            val_preds = model(src)
+
+            val_preds = val_preds.cpu().numpy()
+            tgt = tgt.cpu().numpy()
+
+            val_preds = val_preds * stds + means
+            tgt = tgt * stds + means
+
+            batch_size = tgt.shape[0]
+            all_targets[start_idx: start_idx + batch_size] = tgt
+            all_preds[start_idx: start_idx + batch_size] = val_preds
+            start_idx += batch_size
+
+        return all_preds, all_targets, start_idx
 
 
 def seq2scalar_custom_norm(min_std, df, FEAT_COLS, TARGET_COLS, transformations, seq_variables_x, scalar_variables_x):
@@ -573,13 +579,13 @@ def seq2scalar_custom_norm(min_std, df, FEAT_COLS, TARGET_COLS, transformations,
     return dataset, tensor_data, np.array(stds)
 
 
-def seq2scalar_32(weighted, df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x, scalar_variables_x, seq_variables_y, scalar_variables_y):
+def seq2scalar_32(df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x, scalar_variables_x):
 
     # Preprocess the features and target columns
     for col in FEAT_COLS:
-        X = df.select(FEAT_COLS).with_columns(pl.col(col).cast(pl.Float64))
+        X = df.select(FEAT_COLS).with_columns(pl.col(col).cast(pl.Float32))
     for col in TARGET_COLS:
-        y = df.select(TARGET_COLS).with_columns(pl.col(col).cast(pl.Float64))
+        y = df.select(TARGET_COLS).with_columns(pl.col(col).cast(pl.Float32))
 
     # Normalize features
     X = X.with_columns([(pl.col(col) - mean_x[i]) / std_x[i] for i, col in enumerate(FEAT_COLS)])
@@ -590,11 +596,7 @@ def seq2scalar_32(weighted, df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, s
 
     # Convert the numpy array to a PyTorch tensor
     tensor_data = to_tensor(X, batch_size, sequence_length, seq_variables_x, scalar_variables_x)
-    print("tensor_data input shape:", tensor_data.shape)
     y = y.to_numpy()
-    if weighted:
-        y = y * TARGET_WEIGHTS
-
     y = (y - mean_y) / std_y
     tensor_target = torch.tensor(y, dtype=torch.float32).cuda()
 

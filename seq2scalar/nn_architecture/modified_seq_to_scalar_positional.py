@@ -33,7 +33,12 @@ class ModifiedSequenceToScalarTransformer_positional(nn.Module):
 
         # Transformer Encoder to process the sequence
         self.transformer_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, dropout=dropout, batch_first=True),
+            nn.TransformerEncoderLayer(d_model=d_model,
+                                       nhead=nhead,
+                                       dim_feedforward=dim_feedforward,
+                                       dropout=dropout,
+                                       batch_first=True,
+                                       activation='gelu'),
             num_layers=num_encoder_layers
         )
 
