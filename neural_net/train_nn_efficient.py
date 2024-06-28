@@ -8,7 +8,7 @@ import polars as pl
 from torch.utils.data import DataLoader
 from decimal import Decimal
 
-from glu_mlp import GLU_MLP
+from attention_mlp import ATT_MLP
 from neural_net.utils import mlp_data_32, count_parameters, get_val_loss, collate_fn
 from constants import TARGET_WEIGHTS
 from transformers import get_linear_schedule_with_warmup
@@ -49,16 +49,22 @@ def preprocess():
     if start_from > 0:
         print("WARNING: Starting from chunk:", start_from)
 
-    input_dim = len(FEAT_COLS)
+    seq_length = len(FEAT_COLS)
     hidden_dim = 1000
-    num_layers = 9
+    num_layers = 5
     output_dim = len(TARGET_COLS)
-    LEARNING_RATE = 0.7e-4
+    LEARNING_RATE = 0.9e-4
     BATCH_SIZE = 256
+    feature_dim = 1
+    d_model = 16
+    nhead = 1
+    num_encoder_layers = 8
+    dim_feedforward = 256
+    dropout = 0
 
-    #model = GLU_MLP(input_dim, hidden_dim, output_dim, num_layers).cuda()
+    #model = ATT_MLP(seq_length, feature_dim, d_model, nhead, num_encoder_layers, dim_feedforward, output_dim, dropout).cuda()
 
-    model_name = f'glu_mlp_{min_std}_l_{num_layers}_d_{hidden_dim}_weightless_train_set_2'
+    model_name = f'attention_mlp_{min_std}_l_{num_layers}_d_{hidden_dim}_weightless_train_set_2'
 
     model = torch.load(f"models/{model_name}.model")
 
@@ -105,6 +111,7 @@ def memory_eff_eval(validation_size, chunk_size, FEAT_COLS, TARGET_COLS, mean_x,
                                 )
 
         all_preds, all_targets, start_idx = get_val_loss(model, all_preds, all_targets, start_idx, mean_y, std_y, val_loader)
+        time.sleep(3)
 
     all_preds *= TARGET_WEIGHTS
     all_targets *= TARGET_WEIGHTS
@@ -173,11 +180,11 @@ def train():
     print("Initial validation loss:", min_loss, "time:", end_eval - start_eval)
     time.sleep(1)
 
-    # tensor_mean_y = torch.tensor(mean_y).cuda()
-    # tensor_std_y = torch.tensor(std_y).cuda()
+    tensor_mean_y = torch.tensor(mean_y).cuda()
+    tensor_std_y = torch.tensor(std_y).cuda()
 
     patience = 0
-    r2_denom = np.load("../data/r2_denominator.npy")
+    r2_denom = np.load("../data/r2_denom_denorm.npy")
     r2_denom = r2_denom * TARGET_WEIGHTS + (1 - TARGET_WEIGHTS)
     # for i, col in enumerate(TARGET_COLS):
     #     print(col, r2_denom[i], TARGET_WEIGHTS[i])
@@ -192,82 +199,84 @@ def train():
         reader = pl.read_csv_batched(train_file, batch_size=chunk_size)
         counter = 0
 
-        prep_chunk_time_start = time.time()
-        try:
-            batches = reader.next_batches(20)
-            if batches[0] is None:
-                break  # No more data to read
-        except:
-            break
+        while True:
 
-        end_batches = time.time()
-        print("end batches time:", end_batches - prep_chunk_time_start)
+            prep_chunk_time_start = time.time()
+            try:
+                batches = reader.next_batches(20)
+                if batches[0] is None:
+                    break  # No more data to read
+            except:
+                break
 
-        for df in batches:
+            end_batches = time.time()
+            print("end batches time:", end_batches - prep_chunk_time_start)
 
-            start_chunk_time = time.time()
-            train_dataset, _ = mlp_data_32(df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y)
+            for df in batches:
 
-            train_loader = DataLoader(train_dataset,
-                                      batch_size=BATCH_SIZE,
-                                      shuffle=True,
-                                      collate_fn=collate_fn,
-                                      )
+                start_chunk_time = time.time()
+                train_dataset, _ = mlp_data_32(df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y)
 
-            prep_chunk_time_end = time.time()
+                train_loader = DataLoader(train_dataset,
+                                          batch_size=BATCH_SIZE,
+                                          shuffle=True,
+                                          collate_fn=collate_fn,
+                                          )
 
-            print("epoch:", epoch, "chunk:", counter, "prep chunk time:", prep_chunk_time_end - start_chunk_time)
+                prep_chunk_time_end = time.time()
 
-            total_loss = 0
-            steps = 0
-            train_time_start = time.time()
+                print("epoch:", epoch, "chunk:", counter, "prep chunk time:", prep_chunk_time_end - start_chunk_time)
 
-            model.train()
+                total_loss = 0
+                steps = 0
+                train_time_start = time.time()
 
-            for batch_idx, (src, tgt) in enumerate(train_loader):
+                model.train()
 
-                optimizer.zero_grad()
-                preds = model(src)
+                for batch_idx, (src, tgt) in enumerate(train_loader):
 
-                # preds = preds * tensor_std_y + tensor_mean_y
-                # tgt = tgt * tensor_std_y + tensor_mean_y
+                    optimizer.zero_grad()
+                    preds = model(src)
 
-                tgt = tgt * Targets_norm
-                preds = preds * Targets_norm
+                    preds = preds * tensor_std_y + tensor_mean_y
+                    tgt = tgt * tensor_std_y + tensor_mean_y
 
-                ss_res = (tgt - preds) ** 2
-                mean_ss_res = torch.mean(ss_res, dim=0)
+                    tgt = tgt * Targets_norm
+                    preds = preds * Targets_norm
 
-                r2 = mean_ss_res / r2_denom
+                    ss_res = (tgt - preds) ** 2
+                    mean_ss_res = torch.mean(ss_res, dim=0)
 
-                loss = r2.mean()
-                # loss = torch.sum(ss_res) / torch.sum(ss_tot)
-                #loss = criterion(preds, tgt)
+                    r2 = mean_ss_res / r2_denom
 
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
-                optimizer.step()
-                scheduler.step()  # Update learning rate
+                    loss = r2.mean()
+                    # loss = torch.sum(ss_res) / torch.sum(ss_tot)
+                    #loss = criterion(preds, tgt)
 
-                total_loss += loss.item()
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
+                    optimizer.step()
+                    scheduler.step()  # Update learning rate
 
-                iterations += 1
-                steps += 1
+                    total_loss += loss.item()
 
-                if (batch_idx + 1) % 100 == 0:
-                    train_time_end = time.time()
-                    print("epoch:", epoch, f', chunk: {counter}, Step {batch_idx + 1}, Training Loss: {total_loss / steps:.4f}', "iterations:", iterations, "time:", train_time_end - train_time_start)
-                    total_loss = 0  # Reset the loss for the next steps
-                    steps = 0  # Reset step count
-                    #time.sleep(4)
+                    iterations += 1
+                    steps += 1
 
-            counter += 1
+                    if (batch_idx + 1) % 100 == 0:
+                        train_time_end = time.time()
+                        print("epoch:", epoch, f', chunk: {counter}, Step {batch_idx + 1}, Training Loss: {total_loss / steps:.4f}', "iterations:", iterations, "time:", train_time_end - train_time_start)
+                        total_loss = 0  # Reset the loss for the next steps
+                        steps = 0  # Reset step count
+                        time.sleep(5)
 
-        patience, min_loss, _ = eval_cross_attention_weightless(model, min_loss, patience, epoch, counter, iterations, model_name, validation_size, chunk_size, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, BATCH_SIZE)
+                counter += 1
 
-        for param_group in optimizer.param_groups:
-            print(f"Epoch {epoch}, end of chunk {counter}, Learning Rate: {param_group['lr']}")
-        print()
+            patience, min_loss, _ = eval_cross_attention_weightless(model, min_loss, patience, epoch, counter, iterations, model_name, validation_size, chunk_size, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, BATCH_SIZE)
+
+            for param_group in optimizer.param_groups:
+                print(f"Epoch {epoch}, end of chunk {counter}, Learning Rate: {param_group['lr']}")
+            print()
 
     epoch += 1
 

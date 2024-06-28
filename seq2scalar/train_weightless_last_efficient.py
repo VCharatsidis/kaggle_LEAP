@@ -8,6 +8,7 @@ import polars as pl
 from torch.utils.data import DataLoader
 from decimal import Decimal
 
+from mlp_assemmble import CustomModel
 from cross_attention import CrossAttentionModel
 from modified_seq_to_scalar_positional import ModifiedSequenceToScalarTransformer_positional
 from neural_net.utils import r2_score
@@ -61,13 +62,14 @@ def preprocess():
     dim_feedforward = 256
     output_dim = 368
     dropout = 0.0
-    LEARNING_RATE = 6.8e-5
+    LEARNING_RATE = 2.5e-5
     BATCH_SIZE = 256
     #model = ModifiedSequenceToScalarTransformer_positional(feature_dim, output_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, seq_length).cuda()
     #model = CrossAttentionModel(seq_length, feature_dim, d_model, nhead, num_encoder_layers, dim_feedforward, output_dim, dropout).cuda()
+    #model = CustomModel().cuda()
 
     model_name = f'cross_attention_{min_std}_nhead_{nhead}_enc_l_{num_encoder_layers}_d_{d_model}_weightless_train_set_2'
-
+    #model_name = f"mlp_assemble_output_dim_50_final_output_dim=800_num_layers_8"
     model = torch.load(f"models/{model_name}.model")
 
 
@@ -114,7 +116,7 @@ def memory_eff_eval(validation_size, chunk_size, FEAT_COLS, TARGET_COLS, mean_x,
                                 )
 
         all_preds, all_targets, start_idx = get_val_loss_cross_attention_weightless(model, all_preds, all_targets, start_idx, mean_y, std_y, val_loader)
-        time.sleep(2)
+        #time.sleep(2)
 
     all_preds *= TARGET_WEIGHTS
     all_targets *= TARGET_WEIGHTS
@@ -209,84 +211,78 @@ def train():
             except:
                 break
 
-            if (epoch == 0) and (counter == 0):
-                counter += 10
-                continue
+            # if (epoch == 0) and (counter == 0):
+            #     counter += 10
+            #     continue
 
             print("prep batches time:", time.time() - prep_batches_time_start, "chunk:", counter)
-            last_counter = counter
 
-            while True:
-                counter = last_counter
-                for df in batches:
+            for df in batches:
 
-                    prep_chunk_time_start = time.time()
-                    train_dataset, _ = seq2scalar_32(df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x, scalar_variables_x)
+                prep_chunk_time_start = time.time()
+                train_dataset, _ = seq2scalar_32(df, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, seq_variables_x, scalar_variables_x)
 
-                    train_loader = DataLoader(train_dataset,
-                                              batch_size=BATCH_SIZE,
-                                              shuffle=True,
-                                              collate_fn=collate_fn,
-                                              )
+                train_loader = DataLoader(train_dataset,
+                                          batch_size=BATCH_SIZE,
+                                          shuffle=True,
+                                          collate_fn=collate_fn,
+                                          )
 
-                    prep_chunk_time_end = time.time()
+                prep_chunk_time_end = time.time()
 
-                    print("epoch:", epoch, "chunk:", counter, "prep chunk time:", prep_chunk_time_end - prep_chunk_time_start)
+                print("epoch:", epoch, "chunk:", counter, "prep chunk time:", prep_chunk_time_end - prep_chunk_time_start)
 
-                    total_loss = 0
-                    steps = 0
-                    train_time_start = time.time()
+                total_loss = 0
+                steps = 0
+                train_time_start = time.time()
 
-                    model.train()
+                model.train()
 
-                    for batch_idx, (src, tgt) in enumerate(train_loader):
+                for batch_idx, (src, tgt) in enumerate(train_loader):
 
-                        optimizer.zero_grad()
-                        preds = model(src)
+                    optimizer.zero_grad()
+                    preds = model(src)
 
-                        # preds = preds * tensor_std_y + tensor_mean_y
-                        # tgt = tgt * tensor_std_y + tensor_mean_y
+                    # preds = preds * tensor_std_y + tensor_mean_y
+                    # tgt = tgt * tensor_std_y + tensor_mean_y
 
-                        tgt = tgt * Targets_norm
-                        preds = preds * Targets_norm
+                    tgt = tgt * Targets_norm
+                    preds = preds * Targets_norm
 
-                        ss_res = (tgt - preds) ** 2
-                        mean_ss_res = torch.mean(ss_res, dim=0)
+                    ss_res = (tgt - preds) ** 2
+                    mean_ss_res = torch.mean(ss_res, dim=0)
 
-                        r2 = mean_ss_res / r2_denom
+                    r2 = mean_ss_res / r2_denom
 
-                        loss = r2.mean()
-                        # loss = torch.sum(ss_res) / torch.sum(ss_tot)
-                        #loss = criterion(preds, tgt)
+                    loss = r2.mean()
+                    # loss = torch.sum(ss_res) / torch.sum(ss_tot)
+                    #loss = criterion(preds, tgt)
 
-                        loss.backward()
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
-                        optimizer.step()
-                        scheduler.step()  # Update learning rate
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
+                    optimizer.step()
+                    scheduler.step()  # Update learning rate
 
-                        total_loss += loss.item()
+                    total_loss += loss.item()
 
-                        iterations += 1
-                        steps += 1
+                    iterations += 1
+                    steps += 1
 
-                        if (batch_idx + 1) % 100 == 0:
-                            train_time_end = time.time()
-                            print("epoch:", epoch, f', chunk: {counter}, Step {batch_idx + 1}, Training Loss: {total_loss / steps:.4f}', "iterations:", iterations, "time:", train_time_end - train_time_start)
-                            total_loss = 0  # Reset the loss for the next steps
-                            steps = 0  # Reset step count
-                            time.sleep(4)
+                    if (batch_idx + 1) % 100 == 0:
+                        train_time_end = time.time()
+                        print("epoch:", epoch, f', chunk: {counter}, Step {batch_idx + 1}, Training Loss: {total_loss / steps:.4f}', "iterations:", iterations, "time:", train_time_end - train_time_start)
+                        total_loss = 0  # Reset the loss for the next steps
+                        steps = 0  # Reset step count
+                        #time.sleep(2)
 
-                    counter += 1
+                counter += 1
 
-                old_loss = min_loss
-                patience, min_loss, loss = eval_cross_attention_weightless(model, min_loss, patience, epoch, counter, iterations, model_name, validation_size, chunk_size, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, BATCH_SIZE)
-                time.sleep(5)
-                for param_group in optimizer.param_groups:
-                    print(f"Epoch {epoch}, end of chunk {counter}, Learning Rate: {param_group['lr']}")
-                    print()
+            patience, min_loss, loss = eval_cross_attention_weightless(model, min_loss, patience, epoch, counter, iterations, model_name, validation_size, chunk_size, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, BATCH_SIZE)
+            #time.sleep(10)
+            for param_group in optimizer.param_groups:
+                print(f"Epoch {epoch}, end of chunk {counter}, Learning Rate: {param_group['lr']}")
+                print()
 
-                if loss > old_loss:
-                    break
 
         epoch += 1
 

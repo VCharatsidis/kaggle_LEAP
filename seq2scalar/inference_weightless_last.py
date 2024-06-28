@@ -115,6 +115,6 @@ test_polars = pl.from_pandas(sub[["sample_id"] + TARGET_COLS])
 # REPLACEMENT COLUMNS
 
 print(test_polars.shape)
-test_polars.write_csv("submissions/weightless_last_no_replacement.csv")
+test_polars.write_csv("submissions/cross_weightless_last_no_replacement.csv")
 print("inference done!")
 
