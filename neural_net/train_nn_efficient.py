@@ -268,7 +268,7 @@ def train():
                         print("epoch:", epoch, f', chunk: {counter}, Step {batch_idx + 1}, Training Loss: {total_loss / steps:.4f}', "iterations:", iterations, "time:", train_time_end - train_time_start)
                         total_loss = 0  # Reset the loss for the next steps
                         steps = 0  # Reset step count
-                        time.sleep(5)
+                        time.sleep(10)
 
                 counter += 1
 
