@@ -37,9 +37,9 @@ class CrossAttention(nn.Module):
         return attn_output
 
 
-class CrossAttentionModel_2(nn.Module):
+class MiniCross(nn.Module):
     def __init__(self, seq_length, feature_dim, d_model, nhead, num_encoder_layers, dim_feedforward, output_dim, dropout=0):
-        super(CrossAttentionModel_2, self).__init__()
+        super(MiniCross, self).__init__()
 
         # Encoders
         self.encoder1 = nn.TransformerEncoder(
@@ -99,3 +99,24 @@ class CrossAttentionModel_2(nn.Module):
         return output
 
 
+# Testing the model
+def model_test():
+    N = 5  # Batch size
+    src1 = torch.randn(N, 60, 25)  # N, Layers, Features
+
+    model = CrossAttentionModel_2(
+        seq_length=60,
+        feature_dim=25,
+        d_model=128,
+        nhead=8,
+        num_encoder_layers=3,
+        dim_feedforward=512,
+        output_dim=368,
+        dropout=0.1,
+    )
+
+    output = model(src1)
+    print("Output Shape:", output.shape)
+
+
+# model_test()

@@ -19,7 +19,8 @@ min_std = 1e-12
 std_y = np.clip(std_y, a_min=min_std, a_max=None)
 std_x = np.clip(std_x, a_min=min_std, a_max=None)
 
-model_name = "models/cross_attention_1e-12_nhead_8_enc_l_9_d_256_weightless_train_set_2.model"
+set_num = 7
+model_name = f"models/cross_attention_fixed_1e-12_nhead_8_enc_l_7_d_256_weightless_train_set_{set_num}.model"
 model = torch.load(model_name)
 model.eval()
 
@@ -38,7 +39,7 @@ def collect_predictions_in_batches(model):
     model.eval()  # Set model to evaluation mode
     all_predictions = []
 
-    chunk_size = 5000
+    chunk_size = 10000
     counter = 0
 
     with torch.no_grad():
@@ -115,6 +116,7 @@ test_polars = pl.from_pandas(sub[["sample_id"] + TARGET_COLS])
 # REPLACEMENT COLUMNS
 
 print(test_polars.shape)
-test_polars.write_csv("submissions/cross_weightless_last_no_replacement.csv")
-print("inference done!")
+file = f"submissions/cross_fixed_set_{set_num}.csv"
+test_polars.write_csv(file)
+print("inference done!", file)
 

@@ -53,39 +53,6 @@ class SequenceToSequenceTransformer(nn.Module):
             num_layers=num_encoder_layers
         )
 
-    # def forward(self, src, tgt, teacher_forcing_ratio=0.35):
-    #     # Encode the source sequence
-    #     memory = self.transformer_encoder(self.positional_encoding(self.src_input_linear(src)))
-    #
-    #     # Initialize the output tensor
-    #     tgt = self.tgt_input_linear(tgt)
-    #
-    #     batch_size, seq_len, _ = tgt.size()
-    #     outputs = torch.zeros(batch_size, seq_len, self.output_dim).cuda()
-    #     teacher_forcing_decisions = np.random.rand(seq_len) < teacher_forcing_ratio
-    #
-    #     # Pre-allocate memory for decoder inputs and set the initial input
-    #     decoder_input = torch.zeros(batch_size, 1, self.d_model).cuda()  # Only initialize the first token space
-    #
-    #     for t in range(0, seq_len - 1):
-    #         pos_decoder_input = self.positional_encoding(decoder_input)
-    #         output_step = self.transformer_decoder(pos_decoder_input, memory)
-    #         next_token = self.output_linear(output_step[:, -1, :])
-    #         outputs[:, t, :] = next_token
-    #
-    #         if teacher_forcing_decisions[t]:
-    #             next_input = tgt[:, t, :].unsqueeze(1)  # Use the ground truth token
-    #         else:
-    #             next_input = self.output_to_dmodel(next_token).unsqueeze(1)  # Use the predicted token
-    #
-    #         decoder_input = torch.cat((decoder_input, next_input), dim=1)
-    #
-    #     pos_decoder_input = self.positional_encoding(decoder_input)
-    #     output_step = self.transformer_decoder(pos_decoder_input, memory)
-    #     outputs[:, seq_len - 1, :] = self.output_linear(output_step[:, -1, :])
-    #
-    #     return outputs
-
     def forward(self, src, tgt, teacher_forcing_ratio=0.35):
         # Encode the source sequence
         memory = self.transformer_encoder(self.positional_encoding(self.src_input_linear(src)))

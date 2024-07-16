@@ -28,19 +28,20 @@ class GLU_MLP(nn.Module):
         self.output_dropout = nn.Dropout(dropout_prob)  # Dropout for the output layer
 
     def glu(self, x):
-        a, b = x.chunk(2, dim=1)  # Split the input tensor into two halves
-        return a * torch.sigmoid(b)  # Apply the gate
+        x, gate = x.chunk(2, dim=-1)
+        gate = nn.functional.softmax(gate, dim=-1)
+        return x * gate #+ x
 
     def forward(self, x):
         x = self.glu(self.input_layer(x))
-        # x = self.input_norm(x)
+        x = self.input_norm(x)
         # x = self.input_dropout(x)  # Apply dropout after LayerNorm in the input layer
 
         for layer, norm, dropout in zip(self.hidden_layers, self.hidden_norms, self.hidden_dropouts):
             x = self.glu(layer(x))
-            # x = norm(x)
+            x = norm(x)
             # x = dropout(x)  # Apply dropout after each LayerNorm in hidden layers
 
         x = self.output_layer(x)
-        #x = self.output_dropout(x)  # Apply dropout after the output layer
+
         return x
