@@ -1,13 +1,11 @@
-import json
+
 import time
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.optim as optim
 import polars as pl
 from torch.utils.data import DataLoader
-from decimal import Decimal
 
 from cross_attention_fix import CrossAttentionModel_2
 from mlp_assemmble import CustomModel
@@ -15,8 +13,7 @@ from complex_model import Complex_Transformer
 from hoyso_model import Hoyso_Transformer
 from modified_seq_to_scalar_positional import ModifiedSequenceToScalarTransformer_positional
 from neural_net.utils import r2_score
-from seq2seq_utils import seq2scalar_32, count_parameters, collate_fn, seq2scalar_custom_norm, \
-    seq2scalar_custom_norm_weightless, get_feature_data, get_val_loss_cross_attention_weightless
+from seq2seq_utils import seq2scalar_32, count_parameters, collate_fn, get_val_loss_cross_attention_weightless
 from constants import seq_variables_x, scalar_variables_x, seq_variables_y, scalar_variables_y, seq_length, \
     input_variable_order, TARGET_WEIGHTS
 
@@ -93,14 +90,7 @@ def preprocess():
     for param_group in optimizer.param_groups:
         print(f"Learning Rate: {param_group['lr']}")
 
-    num_warmup_steps = 10000
     num_training_steps = 210000
-
-    # scheduler = get_linear_schedule_with_warmup(
-    #     optimizer,
-    #     num_warmup_steps=num_warmup_steps,
-    #     num_training_steps=num_training_steps
-    # )
 
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_training_steps, eta_min=1e-9)
 
@@ -145,12 +135,7 @@ def memory_eff_eval(validation_size, chunk_size, FEAT_COLS, TARGET_COLS, mean_x,
     all_preds *= TARGET_WEIGHTS
     all_targets *= TARGET_WEIGHTS
 
-    #mean_all_set = np.load("../data/means_y_after_norm.npy")
     mean_all_targets = np.mean(all_targets, axis=0)
-
-    # for i, col in enumerate(TARGET_COLS):
-    #     print(col, mean_all_set[i], mean_all_targets[i])
-    # input()
 
     ss_res_vector = (all_targets - all_preds) ** 2
     ss_tot_vector = (all_targets - mean_all_targets) ** 2
@@ -166,8 +151,6 @@ def memory_eff_eval(validation_size, chunk_size, FEAT_COLS, TARGET_COLS, mean_x,
             print(f"Target {i} {TARGET_COLS[i]} R2:", mean_r2[i], TARGET_WEIGHTS[i])
 
     print("MSE:", np.mean(ss_res_vector), "mean R2:", np.mean(mean_r2), "Fake R2:", ss_res/ss_tot)
-
-    #loss = ss_res / ss_tot
 
     loss = np.sum(mean_r2) / np.sum(TARGET_WEIGHTS)
 
@@ -200,7 +183,7 @@ def train():
     model, optimizer, scheduler, mean_x, std_x, mean_y, std_y, FEAT_COLS, TARGET_COLS, validation_size, chunk_size, model_name, LEARNING_RATE, BATCH_SIZE, min_std, TARGET_WEIGHTS, train_file = preprocess()
 
     start_eval = time.time()
-    min_loss = 1#memory_eff_eval(validation_size, chunk_size, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, BATCH_SIZE, model, True)  # memory_eff_eval()
+    min_loss = memory_eff_eval(validation_size, chunk_size, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, BATCH_SIZE, model, True)  # memory_eff_eval()
     end_eval = time.time()
     print("Initial validation loss:", min_loss, "time:", end_eval - start_eval)
 
@@ -214,7 +197,6 @@ def train():
     r2_denom = torch.tensor(r2_denom).cuda()
 
     Targets_norm = torch.tensor(TARGET_WEIGHTS).cuda()
-    criterion = nn.MSELoss()  # Using MSE for regression
     epoch = 0
     iterations = 0
     while True:
@@ -273,11 +255,7 @@ def train():
                     mean_ss_res = torch.mean(ss_res, dim=0)
 
                     r2 = mean_ss_res / r2_denom
-
-                    #loss = r2.mean()
                     loss = torch.sum(r2) / torch.sum(Targets_norm)
-                    # loss = torch.sum(ss_res) / torch.sum(ss_tot)
-                    #loss = criterion(preds, tgt)
 
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
@@ -297,7 +275,6 @@ def train():
                 counter += 1
 
             patience, min_loss, loss = eval_cross_attention_weightless(optimizer, model, min_loss, patience, epoch, counter, iterations, model_name, validation_size, chunk_size, FEAT_COLS, TARGET_COLS, mean_x, std_x, mean_y, std_y, BATCH_SIZE)
-            #time.sleep(10)
             for param_group in optimizer.param_groups:
                 print(f"Epoch {epoch}, end of chunk {counter}, Learning Rate: {param_group['lr']}")
                 print()
